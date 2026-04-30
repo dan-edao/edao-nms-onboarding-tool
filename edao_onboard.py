@@ -622,7 +622,7 @@ class App(tk.Tk):
         self._proxy_ip_var = StringVar()
         self._ip_range_var = StringVar()
         field("Proxy Public IP:", self._proxy_ip_var, "e.g.  203.0.113.10")
-        field("IP Range:",        self._ip_range_var,
+        field("Monitoring Subnet:", self._ip_range_var,
               "e.g.  192.168.1.0/24   or   192.168.1.1-50")
 
         # ── Section 3: Discovery Checks ──
@@ -909,7 +909,7 @@ class App(tk.Tk):
         if not customer: errors.append("Customer Name")
         if not site:     errors.append("Site Name")
         if not proxy_ip: errors.append("Proxy Public IP")
-        if not ip_range: errors.append("IP Range")
+        if not ip_range: errors.append("Monitoring Subnet")
         if errors:
             messagebox.showwarning("Missing fields",
                 "Please fill in:\n• " + "\n• ".join(errors))
