@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v1.2
-Automates MSP/Customer/Site onboarding in Zabbix 7.x via API.
+EDAO-NMS Onboarding Tool v1.3
+Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
 
@@ -120,8 +120,8 @@ class Onboarder:
 
     # ── Step 1: Proxy ─────────────────────────────────────────────────────
 
-    def create_proxy(self, msp: str, customer: str, site: str, ip: str) -> str:
-        name = f"Proxy{msp}{customer}-{site}"
+    def create_proxy(self, customer: str, site: str, ip: str) -> str:
+        name = f"Proxy{customer}{site}"
         existing = self.api.get_proxy_id(name)
         if existing:
             self._log(f"Proxy '{name}' already exists (id={existing}), skipping.", "WARN")
@@ -134,11 +134,9 @@ class Onboarder:
 
     # ── Step 2: Host groups ───────────────────────────────────────────────
 
-    def create_host_groups(self, msp: str, msp_group: str,
-                           customer: str, site: str) -> tuple:
-        # msp_group = "EDAO-Group",  e.g.  MSP/EDAO-Group/Customer/Site
-        g1 = f"MSP/{msp_group}/{customer}"
-        g2 = f"MSP/{msp_group}/{customer}/{site}"
+    def create_host_groups(self, msp: str, customer: str, site: str) -> tuple:
+        g1 = f"MSP/{msp}/{customer}"
+        g2 = f"MSP/{msp}/{customer}/{site}"
         gid1 = self.api.get_or_create_hostgroup(g1)
         self._log(f"Host group '{g1}'  (id={gid1})")
         gid2 = self.api.get_or_create_hostgroup(g2)
@@ -263,7 +261,7 @@ class Onboarder:
 
     # ── Full onboarding run ───────────────────────────────────────────────
 
-    def run(self, msp: str, msp_group: str, customer: str, site: str,
+    def run(self, msp: str, customer: str, site: str,
             proxy_ip: str, ip_range: str,
             use_icmp: bool, use_snmp: bool, snmp_community: str, use_agent: bool,
             template_ids: list, latitude: str, longitude: str) -> dict:
@@ -272,10 +270,10 @@ class Onboarder:
         self._log(f"Onboarding  MSP={msp}  Customer={customer}  Site={site}")
 
         self._log("── Step 1: Create Proxy ─────────────────────────")
-        r["proxy_id"] = self.create_proxy(msp, customer, site, proxy_ip)
+        r["proxy_id"] = self.create_proxy(customer, site, proxy_ip)
 
         self._log("── Step 2: Create Host Groups ───────────────────")
-        r["gid1"], r["gid2"] = self.create_host_groups(msp, msp_group, customer, site)
+        r["gid1"], r["gid2"] = self.create_host_groups(msp, customer, site)
 
         self._log("── Step 3a: Create Discovery Rule ───────────────")
         r["drule_id"] = self.create_discovery_rule(
@@ -288,9 +286,9 @@ class Onboarder:
 
         self._log("═" * 52)
         self._log("Onboarding complete!", "OK")
-        self._log(f"  Proxy       : Proxy{msp}{customer}-{site}   (id={r['proxy_id']})")
-        self._log(f"  Group 1     : MSP/{msp_group}/{customer}    (id={r['gid1']})")
-        self._log(f"  Group 2     : MSP/{msp_group}/{customer}/{site}  (id={r['gid2']})")
+        self._log(f"  Proxy       : Proxy{customer}{site}   (id={r['proxy_id']})")
+        self._log(f"  Group 1     : MSP/{msp}/{customer}    (id={r['gid1']})")
+        self._log(f"  Group 2     : MSP/{msp}/{customer}/{site}  (id={r['gid2']})")
         self._log(f"  Disc. rule  : Proxy-{customer}-{site}       (id={r['drule_id']})")
         self._log(f"  Disc. action: Discovery{customer}-{site}    (id={r['action_id']})")
         if latitude and longitude:
@@ -315,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v1.1")
+        self.title("EDAO-NMS Onboarding Tool  v1.3")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -337,17 +335,15 @@ class App(tk.Tk):
             try:
                 cfg = json.loads(open(CONFIG_PATH).read())
                 self._url_var.set(cfg.get("url",      DEFAULT_URL))
-                self._user_var.set(cfg.get("username", "dan@edaogroup.io"))
-                self._auth_mode.set(cfg.get("auth_mode", "userpass"))
+                self._user_var.set(cfg.get("username", ""))
             except Exception:
                 pass
 
     def _save_config(self):
         try:
             json.dump({
-                "url":       self._url_var.get(),
-                "username":  self._user_var.get(),
-                "auth_mode": self._auth_mode.get(),
+                "url":      self._url_var.get(),
+                "username": self._user_var.get(),
             }, open(CONFIG_PATH, "w"))
         except Exception:
             pass
@@ -357,21 +353,28 @@ class App(tk.Tk):
     def _build_ui(self):
         banner = tk.Frame(self, bg="#003366")
         banner.pack(fill=X)
-        # Logo
-        try:
-            self._logo_img = tk.PhotoImage(data=LOGO_B64)
-            logo_lbl = tk.Label(banner, image=self._logo_img,
-                                bg="#003366", padx=8, pady=4)
-            logo_lbl.pack(side=LEFT)
-        except Exception:
-            pass
-        tk.Label(banner, text="NMS  Onboarding Tool",
-                 bg="#003366", fg="white",
-                 font=("Helvetica", 20, "bold"), pady=10).pack(side=LEFT, padx=(4,0))
+        # Status label — right side (pack first so it gets priority)
         self._status_lbl = tk.Label(banner, text="● Not connected",
                                     bg="#003366", fg="#FF6B6B",
                                     font=("Helvetica", 13))
         self._status_lbl.pack(side=RIGHT, padx=16)
+        # Centered logo + 2-line title
+        center = tk.Frame(banner, bg="#003366")
+        center.pack(expand=True, pady=8)
+        try:
+            self._logo_img = tk.PhotoImage(data=LOGO_B64)
+            tk.Label(center, image=self._logo_img,
+                     bg="#003366").pack(side=LEFT, padx=(0, 14))
+        except Exception:
+            pass
+        title_frame = tk.Frame(center, bg="#003366")
+        title_frame.pack(side=LEFT)
+        tk.Label(title_frame, text="EDAO",
+                 bg="#003366", fg="white",
+                 font=("Helvetica", 26, "bold")).pack(anchor=W)
+        tk.Label(title_frame, text="NMS Onboarding Tool",
+                 bg="#003366", fg="#aaccff",
+                 font=("Helvetica", 15)).pack(anchor=W)
 
         nb = ttk.Notebook(self)
         nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
@@ -410,12 +413,11 @@ class App(tk.Tk):
 
     def _build_connect_tab(self):
         f = self._tab_connect
-        tk.Label(f, text="Zabbix Server Connection",
+        tk.Label(f, text="EDAO-NMS Connection",
                  font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
                                       sticky=W, padx=16, pady=(16, 8))
 
-        self._url_var   = StringVar(value=DEFAULT_URL)
-        self._auth_mode = StringVar(value="userpass")   # "token" | "userpass"
+        self._url_var  = StringVar(value=DEFAULT_URL)
 
         # Server URL
         tk.Label(f, text="Server URL:", font=FONT_LABEL, anchor=E).grid(
@@ -424,50 +426,22 @@ class App(tk.Tk):
                   font=FONT_ENTRY, width=44).grid(
             row=1, column=1, columnspan=2, sticky=W, pady=6)
 
-        # Auth mode radio
-        mode_frame = tk.Frame(f)
-        mode_frame.grid(row=2, column=0, columnspan=3, sticky=W, padx=16, pady=(8, 2))
-        tk.Label(mode_frame, text="Auth method:", font=FONT_LABEL).pack(side=LEFT, padx=(0, 12))
-        ttk.Radiobutton(mode_frame, text="API Token",
-                        variable=self._auth_mode, value="token",
-                        command=self._toggle_auth_mode).pack(side=LEFT, padx=6)
-        ttk.Radiobutton(mode_frame, text="Username / Password",
-                        variable=self._auth_mode, value="userpass",
-                        command=self._toggle_auth_mode).pack(side=LEFT, padx=6)
-
-        # Token row
-        self._token_frame = tk.Frame(f)
-        self._token_frame.grid(row=3, column=0, columnspan=3, sticky=W+E, padx=16, pady=4)
-        tk.Label(self._token_frame, text="API Token:",
-                 font=FONT_LABEL, anchor=E, width=14).pack(side=LEFT)
-        self._token_var = StringVar()
-        ttk.Entry(self._token_frame, textvariable=self._token_var,
-                  font=FONT_ENTRY, width=52, show="*").pack(side=LEFT, padx=6)
-        ttk.Button(self._token_frame, text="👁 Show/Hide",
-                   command=self._toggle_token_vis).pack(side=LEFT)
-        self._token_shown = False
-
-        # User/pass rows (hidden initially)
-        self._userpass_frame = tk.Frame(f)
-        self._userpass_frame.grid(row=4, column=0, columnspan=3,
-                                   sticky=W+E, padx=16, pady=4)
-        self._user_var = StringVar(value="dan@edaogroup.io")
+        # Username / Password
+        self._user_var = StringVar(value="")
         self._pwd_var  = StringVar()
         for i, (lbl, var, hide) in enumerate([
             ("Username:", self._user_var, False),
             ("Password:", self._pwd_var,  True),
         ]):
-            tk.Label(self._userpass_frame, text=lbl,
-                     font=FONT_LABEL, anchor=E, width=14).grid(
-                row=i, column=0, sticky=E, pady=4)
-            ttk.Entry(self._userpass_frame, textvariable=var,
-                      font=FONT_ENTRY, width=40,
+            tk.Label(f, text=lbl, font=FONT_LABEL, anchor=E, width=14).grid(
+                row=2+i, column=0, sticky=E, padx=(16, 6), pady=6)
+            ttk.Entry(f, textvariable=var, font=FONT_ENTRY, width=40,
                       show="*" if hide else "").grid(
-                row=i, column=1, sticky=W, padx=6, pady=4)
+                row=2+i, column=1, columnspan=2, sticky=W, padx=6, pady=6)
 
         # Buttons
         btn_frame = tk.Frame(f)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=16)
+        btn_frame.grid(row=4, column=0, columnspan=3, pady=16)
         ttk.Button(btn_frame, text="Test & Connect",
                    command=self._do_connect).pack(side=LEFT, padx=8)
         ttk.Button(btn_frame, text="Disconnect",
@@ -475,27 +449,12 @@ class App(tk.Tk):
 
         # Info box
         info = ttk.LabelFrame(f, text="  ℹ  Connection Info", padding=8)
-        info.grid(row=6, column=0, columnspan=3,
+        info.grid(row=5, column=0, columnspan=3,
                   sticky=W+E, padx=16, pady=8)
         self._api_info_lbl = tk.Label(info, text="Not connected.",
                                       font=FONT_SMALL, justify=LEFT, anchor=W)
         self._api_info_lbl.grid(row=0, column=0, sticky=W)
         f.columnconfigure(1, weight=1)
-
-        self._toggle_auth_mode()   # set initial visibility
-
-    def _toggle_auth_mode(self):
-        if self._auth_mode.get() == "token":
-            self._token_frame.grid()
-            self._userpass_frame.grid_remove()
-        else:
-            self._token_frame.grid_remove()
-            self._userpass_frame.grid()
-
-    def _toggle_token_vis(self):
-        e = self._token_frame.winfo_children()[1]   # the Entry widget
-        self._token_shown = not self._token_shown
-        e.configure(show="" if self._token_shown else "*")
 
     # ── Onboarding tab ────────────────────────────────────────────────────
 
@@ -541,19 +500,13 @@ class App(tk.Tk):
 
         # ── Section 1: Customer Info ──
         section("1 · Customer Info")
-        self._msp_var       = StringVar()
-        self._msp_group_var = StringVar()   # e.g. "EDAO-Group"
-        self._customer_var  = StringVar()
-        self._site_var      = StringVar()
+        self._msp_var      = StringVar()
+        self._customer_var = StringVar()
+        self._site_var     = StringVar()
 
-        field("MSP Name:",        self._msp_var,      "e.g.  EDAO")
-        field("MSP Group Label:", self._msp_group_var,
-              "auto-filled as  {MSP}-Group  — edit if needed")
-        field("Customer Name:",   self._customer_var,  "e.g.  Acme")
-        field("Site Name:",       self._site_var,      "e.g.  NYC")
-
-        # Auto-fill MSP Group when MSP changes
-        self._msp_var.trace_add("write", self._autofill_msp_group)
+        field("MSP Name:",      self._msp_var,      "e.g.  EDAO")
+        field("Customer Name:", self._customer_var,  "e.g.  Acme")
+        field("Site Name:",     self._site_var,      "e.g.  NYC")
 
         # Live preview
         self._preview_var = StringVar(value="—")
@@ -564,8 +517,7 @@ class App(tk.Tk):
                  anchor=W, justify=LEFT).grid(
             row=row, column=1, columnspan=2, sticky=W, pady=5)
         row += 1
-        for v in (self._msp_var, self._msp_group_var,
-                  self._customer_var, self._site_var):
+        for v in (self._msp_var, self._customer_var, self._site_var):
             v.trace_add("write", lambda *_: self._update_preview())
 
         # ── Section 2: Network ──
@@ -590,7 +542,7 @@ class App(tk.Tk):
         ttk.Checkbutton(chk, text="SNMP (v1)",
                         variable=self._use_snmp,
                         command=self._toggle_snmp).pack(side=LEFT, padx=8)
-        ttk.Checkbutton(chk, text="Zabbix Agent",
+        ttk.Checkbutton(chk, text="EDAO-NMS Agent",
                         variable=self._use_agent).pack(side=LEFT, padx=8)
         row += 1
 
@@ -839,23 +791,15 @@ class App(tk.Tk):
             self._status_lbl.configure(text="● Not connected", fg="#FF6B6B")
             self._api_info_lbl.configure(text="Not connected.")
 
-    def _autofill_msp_group(self, *_):
-        msp = self._msp_var.get().strip()
-        # Only auto-fill if the field is blank or matches old auto-value
-        current = self._msp_group_var.get().strip()
-        if not current or re.match(r'^.+-Group$', current):
-            self._msp_group_var.set(f"{msp}-Group" if msp else "")
-
     def _update_preview(self):
-        msp      = self._msp_var.get().strip()
-        msp_grp  = self._msp_group_var.get().strip()
-        cust     = self._customer_var.get().strip()
-        site     = self._site_var.get().strip()
+        msp  = self._msp_var.get().strip()
+        cust = self._customer_var.get().strip()
+        site = self._site_var.get().strip()
         if msp or cust or site:
             lines = [
-                f"Proxy name  :  Proxy{msp}{cust}-{site}",
-                f"Group 1     :  MSP/{msp_grp}/{cust}",
-                f"Group 2     :  MSP/{msp_grp}/{cust}/{site}",
+                f"Proxy name  :  Proxy{cust}{site}",
+                f"Group 1     :  MSP/{msp}/{cust}",
+                f"Group 2     :  MSP/{msp}/{cust}/{site}",
                 f"Disc. rule  :  Proxy-{cust}-{site}",
                 f"Disc. action:  Discovery{cust}-{site}",
             ]
@@ -871,40 +815,27 @@ class App(tk.Tk):
 
     def _do_connect(self):
         url  = self._url_var.get().strip()
-        mode = self._auth_mode.get()
         if not url:
             messagebox.showwarning("Missing", "Please enter the server URL.")
             return
 
         def _worker():
             try:
-                api = ZabbixAPI(url)
+                api  = ZabbixAPI(url)
                 # apiinfo.version must be called WITHOUT auth header — always first
-                ver = api.api_version()
-                if mode == "token":
-                    tok = self._token_var.get().strip()
-                    if not tok:
-                        self.after(0, lambda: messagebox.showwarning(
-                            "Missing", "Please enter an API token."))
-                        return
-                    api.use_token(tok)
-                    # Verify token works with a privileged read call
-                    api.call("hostgroup.get", output=["groupid"], limit=1)
-                    info = f"Server : {url}\nAPI ver: {ver}\nAuth   : API Token"
-                else:
-                    user = self._user_var.get().strip()
-                    pwd  = self._pwd_var.get()
-                    if not user or not pwd:
-                        self.after(0, lambda: messagebox.showwarning(
-                            "Missing", "Enter username and password."))
-                        return
-                    api.login(user, pwd)
-                    info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
-
+                ver  = api.api_version()
+                user = self._user_var.get().strip()
+                pwd  = self._pwd_var.get()
+                if not user or not pwd:
+                    self.after(0, lambda: messagebox.showwarning(
+                        "Missing", "Enter your EDAO-NMS username and password."))
+                    return
+                api.login(user, pwd)
+                info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
                 self.api = api
                 self.after(0, lambda: self._set_connected(True, info))
                 self.after(0, lambda: self._log(
-                    f"Connected to {url}  (Zabbix {ver})", "OK"))
+                    f"Connected to {url}  (EDAO-NMS v{ver})", "OK"))
                 self._save_config()
             except Exception as e:
                 self.after(0, lambda: self._set_connected(False))
@@ -915,7 +846,7 @@ class App(tk.Tk):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _do_disconnect(self):
-        if self.api and self._auth_mode.get() == "userpass":
+        if self.api:
             self.api.logout()
         self.api = None
         self._set_connected(False)
@@ -945,8 +876,12 @@ class App(tk.Tk):
 
     def _populate_templates(self):
         self._tmpl_list.delete(0, END)
-        for t in self._templates:
+        default_name = "EDAO-ICMP Ping"
+        for i, t in enumerate(self._templates):
             self._tmpl_list.insert(END, t["name"])
+            if t["name"] == default_name:
+                self._tmpl_list.selection_set(i)
+                self._tmpl_list.see(i)
 
     def _run_onboarding(self):
         if not self._connected or not self.api:
@@ -954,7 +889,6 @@ class App(tk.Tk):
             return
 
         msp      = self._msp_var.get().strip()
-        msp_grp  = self._msp_group_var.get().strip()
         customer = self._customer_var.get().strip()
         site     = self._site_var.get().strip()
         proxy_ip = self._proxy_ip_var.get().strip()
@@ -965,7 +899,6 @@ class App(tk.Tk):
 
         errors = []
         if not msp:      errors.append("MSP Name")
-        if not msp_grp:  errors.append("MSP Group Label")
         if not customer: errors.append("Customer Name")
         if not site:     errors.append("Site Name")
         if not proxy_ip: errors.append("Proxy Public IP")
@@ -985,9 +918,9 @@ class App(tk.Tk):
 
         if not messagebox.askyesno("Confirm Onboarding",
             f"About to create:\n\n"
-            f"  Proxy       :  Proxy{msp}{customer}-{site}  ({proxy_ip})\n"
-            f"  Group 1     :  MSP/{msp_grp}/{customer}\n"
-            f"  Group 2     :  MSP/{msp_grp}/{customer}/{site}\n"
+            f"  Proxy       :  Proxy{customer}{site}  ({proxy_ip})\n"
+            f"  Group 1     :  MSP/{msp}/{customer}\n"
+            f"  Group 2     :  MSP/{msp}/{customer}/{site}\n"
             f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
             f"  Disc. action:  Discovery{customer}-{site}\n"
             f"  Templates   :  {len(template_ids)} selected\n\nProceed?"):
@@ -998,7 +931,7 @@ class App(tk.Tk):
                 ob = Onboarder(self.api,
                     lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv)))
                 r = ob.run(
-                    msp=msp, msp_group=msp_grp,
+                    msp=msp,
                     customer=customer, site=site,
                     proxy_ip=proxy_ip, ip_range=ip_range,
                     use_icmp=self._use_icmp.get(),
