@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,11 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v1.5 — 2026-04-30
+- Removed logo from header
+- Header now shows centered 2-line text: EDAO / NMS Onboarding Tool
+- All files versioned together for consistent tracking
 
 ### v1.4 — 2026-04-30
 - Connect button disables during login to prevent repeat attempts that trigger brute-force lockout
