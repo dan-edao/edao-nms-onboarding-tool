@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 1.9  
+**Version:** 2.0  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,11 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.0 — 2026-04-30
+- Connection tab: New Site / Existing Site selector after connecting
+  - **New Site** → navigates to full Onboarding tab (create proxy, groups, discovery)
+  - **Existing Site** → hides Onboarding tab, navigates directly to PSK Config
 
 ### v1.9 — 2026-04-30
 - PSK Config tab: proxy is no longer a manual dropdown — it reads automatically from the Onboarding tab (Customer + Site name) and updates live as you type

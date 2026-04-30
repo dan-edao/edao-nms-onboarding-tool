@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v1.9
+EDAO-NMS Onboarding Tool v2.0
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -313,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v1.9")
+        self.title("EDAO-NMS Onboarding Tool  v2.0")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -370,16 +370,16 @@ class App(tk.Tk):
                  bg="#003366", fg="#aaccff",
                  font=("Helvetica", 15)).pack()
 
-        nb = ttk.Notebook(self)
-        nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        self._nb = ttk.Notebook(self)
+        self._nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
 
-        self._tab_connect = ttk.Frame(nb)
-        self._tab_onboard = ttk.Frame(nb)
-        self._tab_psk     = ttk.Frame(nb)
+        self._tab_connect = ttk.Frame(self._nb)
+        self._tab_onboard = ttk.Frame(self._nb)
+        self._tab_psk     = ttk.Frame(self._nb)
 
-        nb.add(self._tab_connect, text="  🔌 Connection  ")
-        nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
-        nb.add(self._tab_psk,     text="  🔐 PSK Config  ")
+        self._nb.add(self._tab_connect, text="  🔌 Connection  ")
+        self._nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
+        self._nb.add(self._tab_psk,     text="  🔐 PSK Config  ")
 
         self._build_connect_tab()
         self._build_onboard_tab()
@@ -460,7 +460,61 @@ class App(tk.Tk):
         self._api_info_lbl = tk.Label(info, text="Not connected.",
                                       font=FONT_SMALL, justify=LEFT, anchor=W)
         self._api_info_lbl.grid(row=0, column=0, sticky=W)
+
+        # ── Site mode selector ────────────────────────────────────────────
+        ttk.Separator(f, orient="horizontal").grid(
+            row=7, column=0, columnspan=3, sticky=W+E, padx=16, pady=(12, 4))
+
+        self._site_mode = StringVar(value="new")
+        mode_lbl = tk.Label(f, text="What would you like to do?",
+                            font=FONT_LABEL)
+        mode_lbl.grid(row=8, column=0, columnspan=3, pady=(4, 8))
+
+        btn_mode_frame = tk.Frame(f)
+        btn_mode_frame.grid(row=9, column=0, columnspan=3, pady=(0, 16))
+
+        self._btn_new_site = tk.Button(
+            btn_mode_frame,
+            text="🆕  New Site\nFull onboarding — create proxy,\ngroups, discovery & action",
+            font=FONT_LABEL, width=26, height=3,
+            relief="solid", bd=2, cursor="hand2",
+            bg="#0055aa", fg="white", activebackground="#0077cc",
+            command=lambda: self._set_site_mode("new"))
+        self._btn_new_site.pack(side=LEFT, padx=12)
+
+        self._btn_existing_site = tk.Button(
+            btn_mode_frame,
+            text="🔧  Existing Site\nProxy already created —\napply PSK encryption only",
+            font=FONT_LABEL, width=26, height=3,
+            relief="solid", bd=2, cursor="hand2",
+            bg="#555555", fg="white", activebackground="#777777",
+            command=lambda: self._set_site_mode("existing"))
+        self._btn_existing_site.pack(side=LEFT, padx=12)
+
         f.columnconfigure(1, weight=1)
+
+    def _set_site_mode(self, mode: str):
+        self._site_mode.set(mode)
+        if mode == "new":
+            # Show all tabs
+            if self._nb.index(self._tab_onboard) == "":
+                self._nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
+            try:
+                self._nb.insert(1, self._tab_onboard, text="  🏢 Onboarding  ")
+            except Exception:
+                pass
+            self._btn_new_site.configure(bg="#0055aa")
+            self._btn_existing_site.configure(bg="#555555")
+            self._nb.select(self._tab_onboard)
+        else:
+            # Hide Onboarding tab, go straight to PSK Config
+            try:
+                self._nb.hide(self._tab_onboard)
+            except Exception:
+                pass
+            self._btn_existing_site.configure(bg="#0055aa")
+            self._btn_new_site.configure(bg="#555555")
+            self._nb.select(self._tab_psk)
 
     def _toggle_token_vis(self):
         self._token_shown = not self._token_shown
