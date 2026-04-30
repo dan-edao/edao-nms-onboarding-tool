@@ -257,7 +257,8 @@ class Onboarder:
     def run(self, msp: str, customer: str, site: str,
             proxy_ip: str, ip_range: str,
             use_icmp: bool, use_snmp: bool, snmp_community: str, use_agent: bool,
-            template_ids: list) -> dict:
+            template_ids: list,
+            psk_identity: str = "", psk: str = "") -> dict:
         r = {}
         self._log("═" * 52)
         self._log(f"Onboarding  MSP={msp}  Customer={customer}  Site={site}")
@@ -284,7 +285,13 @@ class Onboarder:
         self._log(f"  Group 2     : MSP/{msp}/{customer}/{site}  (id={r['gid2']})")
         self._log(f"  Disc. rule  : Proxy-{customer}-{site}       (id={r['drule_id']})")
         self._log(f"  Disc. action: Discovery{customer}-{site}    (id={r['action_id']})")
-        self._log("Next: use the PSK Config tab to configure encryption on the proxy.")
+        if psk_identity and psk:
+            self._log("── Step 5: Configure PSK Encryption ─────────────")
+            self.configure_psk(r["proxy_id"], psk_identity, psk)
+            r["psk_applied"] = True
+        else:
+            self._log("PSK Identity / PSK Key not provided — skipping PSK step.", "WARN")
+            r["psk_applied"] = False
         self._log("Then: install proxy on-site and apply PSK via the PSK Config tab.")
         return r
 
@@ -309,7 +316,8 @@ class App(tk.Tk):
 
         self.api: Optional[ZabbixAPI]  = None
         self._connected                = False
-        self._templates: list          = []
+        self._templates: list                    = []
+        self._filtered_template_indices: list    = []
         self._onboard_results: Optional[dict] = None
 
         self._build_ui()
@@ -365,15 +373,12 @@ class App(tk.Tk):
 
         self._tab_connect = ttk.Frame(self._nb)
         self._tab_onboard = ttk.Frame(self._nb)
-        self._tab_psk     = ttk.Frame(self._nb)
 
         self._nb.add(self._tab_connect, text="  🔌 Connection  ")
         self._nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
-        self._nb.add(self._tab_psk,     text="  🔐 PSK Config  ")
 
         self._build_connect_tab()
         self._build_onboard_tab()
-        self._build_psk_tab()
 
         ttk.Separator(self, orient="horizontal").pack(fill=X, padx=8)
         log_frame = ttk.LabelFrame(self, text="  Activity Log", padding=4)
@@ -486,25 +491,16 @@ class App(tk.Tk):
     def _set_site_mode(self, mode: str):
         self._site_mode.set(mode)
         if mode == "new":
-            # Show all tabs
-            if self._nb.index(self._tab_onboard) == "":
-                self._nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
-            try:
-                self._nb.insert(1, self._tab_onboard, text="  🏢 Onboarding  ")
-            except Exception:
-                pass
             self._btn_new_site.configure(bg="#0055aa")
             self._btn_existing_site.configure(bg="#555555")
-            self._nb.select(self._tab_onboard)
         else:
-            # Hide Onboarding tab, go straight to PSK Config
-            try:
-                self._nb.hide(self._tab_onboard)
-            except Exception:
-                pass
             self._btn_existing_site.configure(bg="#0055aa")
             self._btn_new_site.configure(bg="#555555")
-            self._nb.select(self._tab_psk)
+        try:
+            self._nb.insert(1, self._tab_onboard, text="  🏢 Onboarding  ")
+        except Exception:
+            pass
+        self._nb.select(self._tab_onboard)
 
     def _toggle_token_vis(self):
         self._token_shown = not self._token_shown
@@ -615,7 +611,6 @@ class App(tk.Tk):
         row += 1
         for v in (self._msp_var, self._customer_var, self._site_var):
             v.trace_add("write", lambda *_: self._update_preview())
-            v.trace_add("write", self._update_psk_proxy_label)
 
         # ── Section 2: Network ──
         section("2 · Network")
@@ -625,8 +620,15 @@ class App(tk.Tk):
         field("Monitoring Subnet:", self._ip_range_var,
               "e.g.  192.168.1.0/24   or   192.168.1.1-50")
 
-        # ── Section 3: Discovery Checks ──
-        section("3 · Discovery Checks")
+        # ── Section 3: PSK Encryption ──
+        section("3 · PSK Encryption")
+        self._psk_identity_var = StringVar()
+        self._psk_var          = StringVar()
+        field("PSK Identity:", self._psk_identity_var, "e.g.  NMS-PSK-XXXXXXXXXXXXXXXX")
+        field("PSK (hex):",    self._psk_var,           "e.g.  143ccb87baea…")
+
+        # ── Section 4: Discovery Checks ──
+        section("4 · Discovery Checks")
         self._use_icmp  = BooleanVar(value=True)
         self._use_snmp  = BooleanVar(value=True)
         self._snmp_comm = StringVar(value="public")
@@ -651,11 +653,25 @@ class App(tk.Tk):
         self._snmp_entry.grid(row=row, column=1, sticky=W, pady=5)
         row += 1
 
-        # ── Section 4: Templates ──
-        section("4 · Templates to Link")
+        # ── Section 5: Templates ──
+        section("5 · Templates to Link")
         ttk.Button(inner, text="Fetch Available Templates",
                    command=self._fetch_templates).grid(
             row=row, column=0, columnspan=2, sticky=W, padx=16, pady=(0, 6))
+        row += 1
+
+        # Filter bar
+        filter_frame = tk.Frame(inner)
+        filter_frame.grid(row=row, column=0, columnspan=3,
+                          sticky=W+E, padx=16, pady=(0, 4))
+        tk.Label(filter_frame, text="Filter:", font=FONT_LABEL).pack(side=LEFT)
+        self._tmpl_filter_var = StringVar(value="EDAO")
+        filter_entry = ttk.Entry(filter_frame, textvariable=self._tmpl_filter_var,
+                                 font=FONT_ENTRY, width=30)
+        filter_entry.pack(side=LEFT, padx=(6, 8))
+        ttk.Button(filter_frame, text="✕ Clear",
+                   command=lambda: self._tmpl_filter_var.set("")).pack(side=LEFT)
+        self._tmpl_filter_var.trace_add("write", lambda *_: self._apply_tmpl_filter())
         row += 1
 
         tmpl_frame = tk.Frame(inner)
@@ -680,53 +696,6 @@ class App(tk.Tk):
             row=row, column=0, columnspan=3, pady=20)
         row += 1
         inner.columnconfigure(1, weight=1)
-
-    # ── PSK Config tab ────────────────────────────────────────────────────
-
-    def _build_psk_tab(self):
-        f = self._tab_psk
-        tk.Label(f, text="Post-Installation: Configure PSK Encryption",
-                 font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
-                                      sticky=W, padx=16, pady=(16, 8))
-
-        # Proxy name is derived live from the Onboarding tab inputs
-        tk.Label(f, text="Proxy:", font=FONT_LABEL, anchor=E).grid(
-            row=1, column=0, sticky=E, padx=(16, 6), pady=8)
-        self._psk_proxy_name_lbl = tk.Label(f, text="— fill in Onboarding tab first —",
-                                             font=FONT_ENTRY, fg="#007acc", anchor=W)
-        self._psk_proxy_name_lbl.grid(row=1, column=1, columnspan=2, sticky=W, pady=8)
-
-        tk.Label(f, text="PSK Identity:", font=FONT_LABEL, anchor=E).grid(
-            row=2, column=0, sticky=E, padx=(16, 6), pady=8)
-        self._psk_identity_var = StringVar()
-        ttk.Entry(f, textvariable=self._psk_identity_var,
-                  font=FONT_ENTRY, width=42).grid(
-            row=2, column=1, columnspan=2, sticky=W, pady=8)
-
-        tk.Label(f, text="PSK (hex):", font=FONT_LABEL, anchor=E).grid(
-            row=3, column=0, sticky=E, padx=(16, 6), pady=8)
-        self._psk_var = StringVar()
-        ttk.Entry(f, textvariable=self._psk_var,
-                  font=FONT_ENTRY, width=42).grid(
-            row=3, column=1, columnspan=2, sticky=W, pady=8)
-
-        ttk.Separator(f, orient="horizontal").grid(
-            row=4, column=0, columnspan=3, sticky=W+E, padx=16, pady=12)
-        tk.Label(f, text="—  or import from EDAO Control Hub TXT file  —",
-                 font=FONT_SMALL, fg="#888").grid(row=5, column=0, columnspan=3)
-        ttk.Button(f, text="📂  Browse TXT File…",
-                   command=self._import_txt).grid(
-            row=6, column=0, columnspan=3, pady=10)
-        self._txt_file_lbl = tk.Label(f, text="No file selected.",
-                                      font=FONT_SMALL, fg="#888")
-        self._txt_file_lbl.grid(row=7, column=0, columnspan=3)
-
-        ttk.Separator(f, orient="horizontal").grid(
-            row=8, column=0, columnspan=3, sticky=W+E, padx=16, pady=12)
-        ttk.Button(f, text="🔐  Apply PSK Encryption",
-                   command=self._apply_psk).grid(
-            row=9, column=0, columnspan=3, pady=8)
-        f.columnconfigure(1, weight=1)
 
     # ── Shared helpers ────────────────────────────────────────────────────
 
@@ -884,13 +853,23 @@ class App(tk.Tk):
                 "Make sure it matches the expected format.")
 
     def _populate_templates(self):
+        self._apply_tmpl_filter()
+
+    def _apply_tmpl_filter(self):
+        keyword = self._tmpl_filter_var.get().lower()
         self._tmpl_list.delete(0, END)
         default_name = "EDAO-ICMP Ping"
+        # Build a filtered view; track original indices for selection lookup
+        self._filtered_template_indices = []
         for i, t in enumerate(self._templates):
+            if keyword and keyword not in t["name"].lower():
+                continue
             self._tmpl_list.insert(END, t["name"])
+            self._filtered_template_indices.append(i)
             if t["name"] == default_name:
-                self._tmpl_list.selection_set(i)
-                self._tmpl_list.see(i)
+                pos = len(self._filtered_template_indices) - 1
+                self._tmpl_list.selection_set(pos)
+                self._tmpl_list.see(pos)
 
     def _run_onboarding(self):
         if not self._connected or not self.api:
@@ -902,6 +881,8 @@ class App(tk.Tk):
         site     = self._site_var.get().strip()
         proxy_ip = self._proxy_ip_var.get().strip()
         ip_range = self._ip_range_var.get().strip()
+        psk_id   = self._psk_identity_var.get().strip()
+        psk      = self._psk_var.get().strip()
         snmp_c   = self._snmp_comm.get().strip() or "public"
 
         errors = []
@@ -920,9 +901,19 @@ class App(tk.Tk):
                 f"'{proxy_ip}' doesn't look like an IPv4 address.")
             return
 
-        sel_idx      = self._tmpl_list.curselection()
-        template_ids = [self._templates[i]["templateid"] for i in sel_idx]
+        if psk and not re.fullmatch(r"[0-9a-fA-F]+", psk):
+            messagebox.showwarning("Invalid PSK",
+                "PSK must be a hexadecimal string.")
+            return
 
+        sel_idx      = self._tmpl_list.curselection()
+        idx_map      = getattr(self, "_filtered_template_indices", None)
+        if idx_map:
+            template_ids = [self._templates[idx_map[i]]["templateid"] for i in sel_idx]
+        else:
+            template_ids = [self._templates[i]["templateid"] for i in sel_idx]
+
+        psk_line = f"  PSK         :  {'✔ will be applied' if psk_id and psk else '⚠ skipped (fields empty)'}\n"
         if not messagebox.askyesno("Confirm Onboarding",
             f"About to create:\n\n"
             f"  Proxy       :  Proxy{customer}{site}  ({proxy_ip})\n"
@@ -930,7 +921,8 @@ class App(tk.Tk):
             f"  Group 2     :  MSP/{msp}/{customer}/{site}\n"
             f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
             f"  Disc. action:  Discovery{customer}-{site}\n"
-            f"  Templates   :  {len(template_ids)} selected\n\nProceed?"):
+            f"  Templates   :  {len(template_ids)} selected\n"
+            f"{psk_line}\nProceed?"):
             return
 
         def _worker():
@@ -946,19 +938,18 @@ class App(tk.Tk):
                     snmp_community=snmp_c,
                     use_agent=self._use_agent.get(),
                     template_ids=template_ids,
+                    psk_identity=psk_id, psk=psk,
                 )
                 self._onboard_results = r
+                psk_status = "✔ Applied" if r.get("psk_applied") else "⚠ Skipped (fields empty)"
                 self.after(0, lambda: messagebox.showinfo(
                     "Onboarding Complete",
                     f"All steps completed!\n\n"
                     f"Proxy ID        : {r['proxy_id']}\n"
                     f"Group IDs       : {r['gid1']}, {r['gid2']}\n"
                     f"Discovery Rule  : {r['drule_id']}\n"
-                    f"Discovery Action: {r['action_id']}\n\n"
-                    "Next steps:\n"
-                    "1. Use the Hosts tab to assign discovered hosts.\n"
-                    "2. After proxy is installed on-site, apply PSK\n"
-                    "   encryption via the PSK Config tab.",
+                    f"Discovery Action: {r['action_id']}\n"
+                    f"PSK Encryption  : {psk_status}\n",
                 ))
             except Exception as e:
                 self.after(0, lambda: self._log(
@@ -968,95 +959,6 @@ class App(tk.Tk):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    # ── PSK Config callbacks ──────────────────────────────────────────────
-
-    def _update_psk_proxy_label(self, *_):
-        """Keep the PSK tab proxy label in sync with Onboarding tab fields."""
-        customer = self._customer_var.get().strip()
-        site     = self._site_var.get().strip()
-        if customer or site:
-            self._psk_proxy_name_lbl.configure(
-                text=f"Proxy{customer}{site}", fg="#007acc")
-        else:
-            self._psk_proxy_name_lbl.configure(
-                text="— fill in Onboarding tab first —", fg="#888")
-
-    def _import_txt(self):
-        path = filedialog.askopenfilename(
-            title="Select EDAO Control Hub TXT file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
-        if not path:
-            return
-        try:
-            content = open(path, encoding="utf-8", errors="replace").read()
-        except Exception as e:
-            messagebox.showerror("Error", f"Cannot read file: {e}")
-            return
-
-        id_m  = re.search(r"TLSPSKIdentity\s*=\s*(\S+)", content, re.I)
-        hex_m = re.search(r"(?:PSK|psk)[:\s=]+([0-9a-fA-F]{32,})", content)
-
-        if id_m:  self._psk_identity_var.set(id_m.group(1))
-        if hex_m: self._psk_var.set(hex_m.group(1))
-
-        fname = os.path.basename(path)
-        self._txt_file_lbl.configure(text=f"Loaded: {fname}", fg="#4ec9b0")
-        if not id_m and not hex_m:
-            messagebox.showinfo("Partial parse",
-                "Could not auto-detect PSK Identity or PSK hex.\n"
-                "Please enter them manually.")
-        else:
-            self._log(f"Imported PSK data from: {fname}", "OK")
-
-    def _apply_psk(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        # Derive proxy name from Onboarding tab fields
-        customer   = self._customer_var.get().strip()
-        site       = self._site_var.get().strip()
-        proxy_name = f"Proxy{customer}{site}"
-
-        if not customer or not site:
-            messagebox.showwarning("Missing",
-                "Fill in Customer Name and Site Name on the Onboarding tab first.")
-            return
-
-        identity = self._psk_identity_var.get().strip()
-        psk      = self._psk_var.get().strip()
-        if not identity or not psk:
-            messagebox.showwarning("Missing",
-                "PSK Identity and PSK are both required.")
-            return
-        if not re.fullmatch(r"[0-9a-fA-F]+", psk):
-            messagebox.showwarning("Invalid PSK",
-                "PSK must be a hexadecimal string.")
-            return
-
-        def _worker():
-            try:
-                # Look up the proxy ID by name
-                proxy_id = self.api.get_proxy_id(proxy_name)
-                if not proxy_id:
-                    self.after(0, lambda: messagebox.showerror(
-                        "Proxy not found",
-                        f"No proxy named '{proxy_name}' found in EDAO-NMS.\n"
-                        "Run the Onboarding step first."))
-                    return
-                ob = Onboarder(self.api,
-                    lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv)))
-                ob.configure_psk(proxy_id, identity, psk)
-                self.after(0, lambda: messagebox.showinfo(
-                    "PSK Applied",
-                    f"PSK encryption configured for '{proxy_name}'."))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"PSK config failed: {e}", "ERR"))
-                self.after(0, lambda: messagebox.showerror(
-                    "PSK failed", str(e)))
-
-        threading.Thread(target=_worker, daemon=True).start()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
