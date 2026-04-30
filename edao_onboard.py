@@ -399,49 +399,54 @@ class App(tk.Tk):
 
     def _build_connect_tab(self):
         f = self._tab_connect
-        tk.Label(f, text="EDAO-NMS Connection",
-                 font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
-                                      sticky=W, padx=16, pady=(16, 8))
+
+        # Centre content in a fixed-width inner frame
+        wrap = tk.Frame(f)
+        wrap.place(relx=0.5, rely=0.5, anchor="center")
 
         self._url_var     = StringVar(value=DEFAULT_URL)
         self._token_var   = StringVar()
         self._token_shown = False
         self._token_saved = False
 
+        tk.Label(wrap, text="EDAO-NMS Connection",
+                 font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
+                                      pady=(0, 12))
+
         # Server URL
-        tk.Label(f, text="Server URL:", font=FONT_LABEL, anchor=E).grid(
-            row=1, column=0, sticky=E, padx=(16, 6), pady=6)
-        ttk.Entry(f, textvariable=self._url_var,
-                  font=FONT_ENTRY, width=44).grid(
-            row=1, column=1, columnspan=2, sticky=W, pady=6)
+        tk.Label(wrap, text="Server URL:", font=FONT_LABEL, anchor=E).grid(
+            row=1, column=0, sticky=E, padx=(0, 8), pady=4)
+        ttk.Entry(wrap, textvariable=self._url_var,
+                  font=FONT_ENTRY, width=40).grid(
+            row=1, column=1, columnspan=2, sticky=W, pady=4)
 
         # API Token
-        tk.Label(f, text="API Token:", font=FONT_LABEL, anchor=E).grid(
-            row=2, column=0, sticky=E, padx=(16, 6), pady=6)
-        self._token_entry = ttk.Entry(f, textvariable=self._token_var,
-                                      font=FONT_ENTRY, width=44, show="*")
-        self._token_entry.grid(row=2, column=1, sticky=W, padx=6, pady=6)
-        ttk.Button(f, text="👁  Show / Hide",
+        tk.Label(wrap, text="API Token:", font=FONT_LABEL, anchor=E).grid(
+            row=2, column=0, sticky=E, padx=(0, 8), pady=4)
+        self._token_entry = ttk.Entry(wrap, textvariable=self._token_var,
+                                      font=FONT_ENTRY, width=40, show="*")
+        self._token_entry.grid(row=2, column=1, sticky=W, padx=(0, 6), pady=4)
+        ttk.Button(wrap, text="👁  Show / Hide",
                    command=self._toggle_token_vis).grid(
-            row=2, column=2, sticky=W, padx=4)
+            row=2, column=2, sticky=W)
 
         # Save / Replace / Clear buttons
-        tok_btn_row = tk.Frame(f)
-        tok_btn_row.grid(row=3, column=0, columnspan=3, sticky=W, padx=16, pady=(0, 6))
+        tok_btn_row = tk.Frame(wrap)
+        tok_btn_row.grid(row=3, column=0, columnspan=3, pady=(2, 2))
         ttk.Button(tok_btn_row, text="💾  Save Token",
                    command=self._save_token).pack(side=LEFT, padx=(0, 8))
         ttk.Button(tok_btn_row, text="🔄  Replace Token",
                    command=self._replace_token).pack(side=LEFT, padx=(0, 8))
         ttk.Button(tok_btn_row, text="✕  Clear Token",
                    command=self._clear_token).pack(side=LEFT)
-        self._saved_token_lbl = tk.Label(f, text="No token saved.",
+
+        self._saved_token_lbl = tk.Label(wrap, text="No token saved.",
                                          font=FONT_SMALL, fg="#888")
-        self._saved_token_lbl.grid(row=4, column=0, columnspan=3,
-                                    sticky=W, padx=16, pady=(0, 8))
+        self._saved_token_lbl.grid(row=4, column=0, columnspan=3, pady=(0, 6))
 
         # Connect / Disconnect buttons
-        btn_frame = tk.Frame(f)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=16)
+        btn_frame = tk.Frame(wrap)
+        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
         self._connect_btn = ttk.Button(btn_frame, text="Test & Connect",
                                        command=self._do_connect)
         self._connect_btn.pack(side=LEFT, padx=8)
@@ -449,15 +454,11 @@ class App(tk.Tk):
                    command=self._do_disconnect).pack(side=LEFT, padx=8)
 
         # Info box
-        info = ttk.LabelFrame(f, text="  ℹ  Connection Info", padding=8)
-        info.grid(row=6, column=0, columnspan=3,
-                  sticky=W+E, padx=16, pady=8)
+        info = ttk.LabelFrame(wrap, text="  ℹ  Connection Info", padding=6)
+        info.grid(row=6, column=0, columnspan=3, sticky=W+E, pady=8)
         self._api_info_lbl = tk.Label(info, text="Not connected.",
                                       font=FONT_SMALL, justify=LEFT, anchor=W)
         self._api_info_lbl.grid(row=0, column=0, sticky=W)
-
-        # ── Site mode selector ────────────────────────────────────────────
-        f.columnconfigure(1, weight=1)
 
     def _toggle_token_vis(self):
         self._token_shown = not self._token_shown
@@ -514,19 +515,19 @@ class App(tk.Tk):
         def section(title):
             nonlocal row
             tk.Label(inner, text=title, font=FONT_HEAD, anchor=W).grid(
-                row=row, column=0, columnspan=3, sticky=W, padx=16, pady=(16, 4))
+                row=row, column=0, columnspan=3, sticky=W, padx=16, pady=(10, 2))
             ttk.Separator(inner, orient="horizontal").grid(
                 row=row+1, column=0, columnspan=3,
-                sticky=W+E, padx=16, pady=(0, 8))
+                sticky=W+E, padx=16, pady=(0, 4))
             row += 2
 
         def field(label, var, hint="", width=30):
             nonlocal row
             tk.Label(inner, text=label, font=FONT_LABEL, anchor=E).grid(
-                row=row, column=0, sticky=E, padx=(16, 6), pady=5)
+                row=row, column=0, sticky=E, padx=(16, 6), pady=3)
             ttk.Entry(inner, textvariable=var,
                       font=FONT_ENTRY, width=width).grid(
-                row=row, column=1, sticky=W, pady=5)
+                row=row, column=1, sticky=W, pady=3)
             if hint:
                 tk.Label(inner, text=hint, font=FONT_SMALL, fg="#888").grid(
                     row=row, column=2, sticky=W, padx=6)
@@ -535,7 +536,7 @@ class App(tk.Tk):
         # ── Import from TXT ──────────────────────────────────────────────
         imp_frame = tk.Frame(inner, bg="#e8f0fe", bd=1, relief="solid")
         imp_frame.grid(row=row, column=0, columnspan=3,
-                       sticky=W+E, padx=16, pady=(12, 4))
+                       sticky=W+E, padx=16, pady=(8, 4))
         row += 1
         tk.Label(imp_frame,
                  text="📄  Auto-fill all fields from customer TXT file",
@@ -622,7 +623,7 @@ class App(tk.Tk):
         filter_frame.grid(row=row, column=0, columnspan=3,
                           sticky=W+E, padx=16, pady=(0, 4))
         tk.Label(filter_frame, text="Filter:", font=FONT_LABEL).pack(side=LEFT)
-        self._tmpl_filter_var = StringVar(value="EDAO")
+        self._tmpl_filter_var = StringVar(value="")
         filter_entry = ttk.Entry(filter_frame, textvariable=self._tmpl_filter_var,
                                  font=FONT_ENTRY, width=30)
         filter_entry.pack(side=LEFT, padx=(6, 8))
@@ -643,8 +644,9 @@ class App(tk.Tk):
         self._tmpl_list.configure(yscrollcommand=tsb.set)
         self._tmpl_list.pack(side=LEFT, fill=BOTH, expand=True)
         tsb.pack(side=LEFT, fill=Y)
-        tk.Label(inner, text="(Ctrl / ⌘ + click to multi-select)",
-                 font=FONT_SMALL, fg="#888").grid(
+        tk.Label(inner,
+                 text="💡  Hold Ctrl (Windows) or ⌘ Cmd (Mac) and click to select multiple templates",
+                 font=FONT_SMALL, fg="#555").grid(
             row=row, column=0, columnspan=3, sticky=W, padx=16)
         row += 1
 
