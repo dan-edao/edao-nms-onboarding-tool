@@ -312,7 +312,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("EDAO-NMS Onboarding Tool  v2.2")
         self.resizable(True, True)
-        self.minsize(900, 760)
+        self.minsize(900, 960)
 
         self.api: Optional[ZabbixAPI]  = None
         self._connected                = False
@@ -636,7 +636,7 @@ class App(tk.Tk):
                         sticky=W+E, padx=16, pady=4)
         row += 1
         self._tmpl_list = tk.Listbox(tmpl_frame, selectmode=EXTENDED,
-                                     font=FONT_ENTRY, height=6, width=56,
+                                     font=FONT_ENTRY, height=14, width=56,
                                      exportselection=False)
         tsb = ttk.Scrollbar(tmpl_frame, orient="vertical",
                              command=self._tmpl_list.yview)
