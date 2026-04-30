@@ -358,23 +358,15 @@ class App(tk.Tk):
                                     bg="#003366", fg="#FF6B6B",
                                     font=("Helvetica", 13))
         self._status_lbl.pack(side=RIGHT, padx=16)
-        # Centered logo + 2-line title
+        # Centered 2-line title
         center = tk.Frame(banner, bg="#003366")
-        center.pack(expand=True, pady=8)
-        try:
-            self._logo_img = tk.PhotoImage(data=LOGO_B64)
-            tk.Label(center, image=self._logo_img,
-                     bg="#003366").pack(side=LEFT, padx=(0, 14))
-        except Exception:
-            pass
-        title_frame = tk.Frame(center, bg="#003366")
-        title_frame.pack(side=LEFT)
-        tk.Label(title_frame, text="EDAO",
+        center.pack(expand=True, pady=10)
+        tk.Label(center, text="EDAO",
                  bg="#003366", fg="white",
-                 font=("Helvetica", 26, "bold")).pack(anchor=W)
-        tk.Label(title_frame, text="NMS Onboarding Tool",
+                 font=("Helvetica", 28, "bold")).pack()
+        tk.Label(center, text="NMS Onboarding Tool",
                  bg="#003366", fg="#aaccff",
-                 font=("Helvetica", 15)).pack(anchor=W)
+                 font=("Helvetica", 15)).pack()
 
         nb = ttk.Notebook(self)
         nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
