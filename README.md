@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,10 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v1.6 — 2026-04-30
+- Removed Hosts tab — discovery action automatically handles all host assignments
+- Tool is now 3 tabs: Connection → Onboarding → PSK Config
 
 ### v1.5 — 2026-04-30
 - Removed logo from header

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v1.3
+EDAO-NMS Onboarding Tool v1.6
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime
 from typing import Optional
 from tkinter import (
-    END, EXTENDED, LEFT, RIGHT, BOTH, X, Y, W, E, N, S,
+    END, LEFT, RIGHT, BOTH, X, Y, W, E,
     BooleanVar, StringVar,
     filedialog, messagebox, scrolledtext,
 )
@@ -313,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v1.3")
+        self.title("EDAO-NMS Onboarding Tool  v1.6")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -321,9 +321,6 @@ class App(tk.Tk):
         self._connected                = False
         self._templates: list          = []
         self._onboard_results: Optional[dict] = None
-        self._host_rows: list          = []
-        self._host_groups_all: list    = []
-        self._proxies_all: list        = []
 
         self._build_ui()
         self._load_config()
@@ -373,17 +370,14 @@ class App(tk.Tk):
 
         self._tab_connect = ttk.Frame(nb)
         self._tab_onboard = ttk.Frame(nb)
-        self._tab_hosts   = ttk.Frame(nb)
         self._tab_psk     = ttk.Frame(nb)
 
         nb.add(self._tab_connect, text="  🔌 Connection  ")
         nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
-        nb.add(self._tab_hosts,   text="  🖥  Hosts  ")
         nb.add(self._tab_psk,     text="  🔐 PSK Config  ")
 
         self._build_connect_tab()
         self._build_onboard_tab()
-        self._build_hosts_tab()
         self._build_psk_tab()
 
         ttk.Separator(self, orient="horizontal").pack(fill=X, padx=8)
@@ -627,132 +621,6 @@ class App(tk.Tk):
             row=row, column=0, columnspan=3, pady=20)
         row += 1
         inner.columnconfigure(1, weight=1)
-
-    # ── Hosts tab ─────────────────────────────────────────────────────────
-
-    def _build_hosts_tab(self):
-        f = self._tab_hosts
-
-        # Search
-        sf = ttk.LabelFrame(f, text="  Search Hosts", padding=8)
-        sf.pack(fill=X, padx=8, pady=(8, 4))
-
-        tk.Label(sf, text="Name / IP:", font=FONT_LABEL).grid(
-            row=0, column=0, sticky=E, padx=(0, 6))
-        self._host_search_var = StringVar()
-        ttk.Entry(sf, textvariable=self._host_search_var,
-                  font=FONT_ENTRY, width=26).grid(row=0, column=1, sticky=W)
-
-        tk.Label(sf, text="Group:", font=FONT_LABEL).grid(
-            row=0, column=2, sticky=E, padx=(16, 6))
-        self._host_group_filter_var = StringVar()
-        self._host_group_filter_cb  = ttk.Combobox(
-            sf, textvariable=self._host_group_filter_var,
-            font=FONT_ENTRY, width=28, state="readonly")
-        self._host_group_filter_cb.grid(row=0, column=3, sticky=W)
-
-        br = tk.Frame(sf)
-        br.grid(row=1, column=0, columnspan=4, pady=(8, 0), sticky=W)
-        ttk.Button(br, text="🔍 Search",
-                   command=self._search_hosts).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(br, text="↻ Load Groups",
-                   command=self._load_host_groups_filter).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(br, text="Clear",
-                   command=self._clear_host_search).pack(side=LEFT)
-        self._host_count_lbl = tk.Label(br, text="",
-                                        font=FONT_SMALL, fg="#888")
-        self._host_count_lbl.pack(side=LEFT, padx=16)
-
-        # Treeview
-        tf = ttk.LabelFrame(
-            f, text="  Results  (Ctrl / ⌘ + click to multi-select)", padding=4)
-        tf.pack(fill=BOTH, expand=True, padx=8, pady=4)
-
-        cols = ("hostname", "display_name", "ip", "groups", "proxy")
-        self._host_tree = ttk.Treeview(tf, columns=cols, show="headings",
-                                        selectmode="extended", height=10)
-        widths = {"hostname": 155, "display_name": 155, "ip": 110,
-                  "groups": 225, "proxy": 130}
-        heads  = {"hostname": "Hostname", "display_name": "Display Name",
-                  "ip": "IP Address", "groups": "Current Groups", "proxy": "Proxy"}
-        for c in cols:
-            self._host_tree.heading(c, text=heads[c],
-                                    command=lambda _c=c: self._sort_tree(_c))
-            self._host_tree.column(c, width=widths[c], minwidth=60)
-
-        tv_vsb = ttk.Scrollbar(tf, orient="vertical",
-                               command=self._host_tree.yview)
-        tv_hsb = ttk.Scrollbar(tf, orient="horizontal",
-                               command=self._host_tree.xview)
-        self._host_tree.configure(yscrollcommand=tv_vsb.set,
-                                   xscrollcommand=tv_hsb.set)
-        self._host_tree.grid(row=0, column=0, sticky=N+S+E+W)
-        tv_vsb.grid(row=0, column=1, sticky=N+S)
-        tv_hsb.grid(row=1, column=0, sticky=E+W)
-        tf.columnconfigure(0, weight=1)
-        tf.rowconfigure(0, weight=1)
-
-        sel_row = tk.Frame(tf)
-        sel_row.grid(row=2, column=0, columnspan=2, sticky=W, pady=(4, 0))
-        ttk.Button(sel_row, text="Select All",
-                   command=self._select_all_hosts).pack(side=LEFT, padx=4)
-        ttk.Button(sel_row, text="Deselect All",
-                   command=self._deselect_all_hosts).pack(side=LEFT, padx=4)
-        self._host_sel_lbl = tk.Label(sel_row, text="0 selected",
-                                      font=FONT_SMALL, fg="#888")
-        self._host_sel_lbl.pack(side=LEFT, padx=12)
-        self._host_tree.bind("<<TreeviewSelect>>",
-                              lambda e: self._update_sel_count())
-
-        # Mass update actions
-        af = ttk.LabelFrame(f, text="  Actions for Selected Hosts", padding=8)
-        af.pack(fill=X, padx=8, pady=(4, 8))
-
-        tk.Label(af, text="Add to Host Group:",
-                 font=FONT_LABEL, anchor=E).grid(
-            row=0, column=0, sticky=E, padx=(0, 6), pady=5)
-        self._mu_group_var = StringVar()
-        self._mu_group_cb  = ttk.Combobox(af, textvariable=self._mu_group_var,
-                                           font=FONT_ENTRY, width=36,
-                                           state="readonly")
-        self._mu_group_cb.grid(row=0, column=1, sticky=W, pady=5)
-        ttk.Button(af, text="↻ Load",
-                   command=self._load_mu_groups).grid(
-            row=0, column=2, sticky=W, padx=6, pady=5)
-
-        tk.Label(af, text="Assign Proxy:",
-                 font=FONT_LABEL, anchor=E).grid(
-            row=1, column=0, sticky=E, padx=(0, 6), pady=5)
-        self._mu_proxy_var = StringVar()
-        self._mu_proxy_cb  = ttk.Combobox(af, textvariable=self._mu_proxy_var,
-                                           font=FONT_ENTRY, width=36,
-                                           state="readonly")
-        self._mu_proxy_cb.grid(row=1, column=1, sticky=W, pady=5)
-        ttk.Button(af, text="↻ Load",
-                   command=self._load_mu_proxies).grid(
-            row=1, column=2, sticky=W, padx=6, pady=5)
-
-        tk.Label(af, text="Location:",
-                 font=FONT_LABEL, anchor=E).grid(
-            row=2, column=0, sticky=E, padx=(0, 6), pady=5)
-        loc = tk.Frame(af)
-        loc.grid(row=2, column=1, sticky=W, pady=5)
-        self._mu_lat_var = StringVar()
-        self._mu_lng_var = StringVar()
-        tk.Label(loc, text="Lat:", font=FONT_SMALL).pack(side=LEFT)
-        ttk.Entry(loc, textvariable=self._mu_lat_var,
-                  font=FONT_ENTRY, width=12).pack(side=LEFT, padx=(2, 10))
-        tk.Label(loc, text="Lon:", font=FONT_SMALL).pack(side=LEFT)
-        ttk.Entry(loc, textvariable=self._mu_lng_var,
-                  font=FONT_ENTRY, width=12).pack(side=LEFT, padx=(2, 0))
-        tk.Label(af, text="(leave blank to skip)",
-                 font=FONT_SMALL, fg="#888").grid(
-            row=2, column=2, sticky=W, padx=6)
-
-        ttk.Button(af, text="▶  Apply Mass Update to Selected Hosts",
-                   command=self._apply_mass_update).grid(
-            row=3, column=0, columnspan=3, pady=12)
-        af.columnconfigure(1, weight=1)
 
     # ── PSK Config tab ────────────────────────────────────────────────────
 
@@ -1025,229 +893,6 @@ class App(tk.Tk):
                     f"Onboarding failed: {e}", "ERR"))
                 self.after(0, lambda: messagebox.showerror(
                     "Onboarding failed", str(e)))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    # ── Hosts tab callbacks ───────────────────────────────────────────────
-
-    def _load_host_groups_filter(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        def _worker():
-            try:
-                groups = self.api.call("hostgroup.get",
-                    output=["groupid", "name"], sortfield="name")
-                self._host_groups_all = groups
-                names = ["— all groups —"] + [g["name"] for g in groups]
-                self.after(0, lambda: self._host_group_filter_cb.configure(
-                    values=names))
-                self.after(0, lambda: self._host_group_filter_var.set(
-                    "— all groups —"))
-                self.after(0, lambda: self._log(
-                    f"Loaded {len(groups)} host groups.", "OK"))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Failed to load groups: {e}", "ERR"))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _load_mu_groups(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        def _worker():
-            try:
-                groups = self.api.call("hostgroup.get",
-                    output=["groupid", "name"], sortfield="name")
-                self._host_groups_all = groups
-                names = [g["name"] for g in groups]
-                self.after(0, lambda: self._mu_group_cb.configure(values=names))
-                self.after(0, lambda: self._log(
-                    f"Loaded {len(groups)} groups.", "OK"))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Failed to load groups: {e}", "ERR"))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _load_mu_proxies(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        def _worker():
-            try:
-                proxies = self.api.call("proxy.get",
-                    output=["proxyid", "name"], sortfield="name")
-                self._proxies_all = proxies
-                names = [p["name"] for p in proxies]
-                self.after(0, lambda: self._mu_proxy_cb.configure(values=names))
-                self.after(0, lambda: self._log(
-                    f"Loaded {len(proxies)} proxies.", "OK"))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Failed to load proxies: {e}", "ERR"))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _search_hosts(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        search_text  = self._host_search_var.get().strip()
-        group_filter = self._host_group_filter_var.get()
-        group_ids    = None
-        if group_filter and group_filter != "— all groups —":
-            match = [g for g in self._host_groups_all
-                     if g["name"] == group_filter]
-            if match:
-                group_ids = [match[0]["groupid"]]
-
-        def _worker():
-            try:
-                params = {
-                    "output": ["hostid", "host", "name", "proxyid"],
-                    "selectGroups":     ["groupid", "name"],
-                    "selectInterfaces": ["ip", "type", "main"],
-                    "limit": 500,
-                    "sortfield": "host",
-                }
-                if search_text:
-                    params["search"]                = {"host": search_text,
-                                                       "name": search_text}
-                    params["searchByAny"]           = True
-                    params["searchWildcardsEnabled"]= True
-                if group_ids:
-                    params["groupids"] = group_ids
-
-                hosts = self.api.call("host.get", params)
-
-                # Fetch proxy names in batch
-                pids = list({h.get("proxyid") for h in hosts
-                             if h.get("proxyid")})
-                proxy_names = {}
-                if pids:
-                    px = self.api.call("proxy.get",
-                        proxyids=pids, output=["proxyid", "name"])
-                    proxy_names = {p["proxyid"]: p["name"] for p in px}
-
-                self._host_rows = hosts
-                self.after(0, lambda: self._populate_host_tree(
-                    hosts, proxy_names))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Host search failed: {e}", "ERR"))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _populate_host_tree(self, hosts: list, proxy_names: dict):
-        self._host_tree.delete(*self._host_tree.get_children())
-        for h in hosts:
-            ifaces = h.get("interfaces") or []
-            main   = next((i for i in ifaces if i.get("main") == "1"), None)
-            ip     = (main or ifaces[0]).get("ip", "—") if ifaces else "—"
-            groups = ", ".join(g["name"] for g in (h.get("groups") or []))
-            proxy  = proxy_names.get(h.get("proxyid"), "Server")
-            self._host_tree.insert("", END, iid=h["hostid"],
-                values=(h["host"], h["name"], ip, groups, proxy))
-        n = len(hosts)
-        self._host_count_lbl.configure(
-            text=f"{n} host{'s' if n != 1 else ''} found")
-        self._update_sel_count()
-
-    def _clear_host_search(self):
-        self._host_search_var.set("")
-        self._host_group_filter_var.set("")
-        self._host_tree.delete(*self._host_tree.get_children())
-        self._host_count_lbl.configure(text="")
-        self._update_sel_count()
-
-    def _select_all_hosts(self):
-        self._host_tree.selection_set(self._host_tree.get_children())
-        self._update_sel_count()
-
-    def _deselect_all_hosts(self):
-        self._host_tree.selection_remove(self._host_tree.get_children())
-        self._update_sel_count()
-
-    def _update_sel_count(self):
-        n = len(self._host_tree.selection())
-        self._host_sel_lbl.configure(text=f"{n} selected")
-
-    def _sort_tree(self, col: str):
-        items   = [(self._host_tree.set(k, col), k)
-                   for k in self._host_tree.get_children("")]
-        reverse = getattr(self, f"_sort_rev_{col}", False)
-        items.sort(key=lambda t: t[0].lower(), reverse=reverse)
-        for i, (_, k) in enumerate(items):
-            self._host_tree.move(k, "", i)
-        setattr(self, f"_sort_rev_{col}", not reverse)
-
-    def _apply_mass_update(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        selected_ids = list(self._host_tree.selection())
-        if not selected_ids:
-            messagebox.showwarning("No selection",
-                "Please select at least one host.")
-            return
-
-        group_name = self._mu_group_var.get().strip()
-        proxy_name = self._mu_proxy_var.get().strip()
-        lat        = self._mu_lat_var.get().strip()
-        lng        = self._mu_lng_var.get().strip()
-
-        if not group_name and not proxy_name and not (lat and lng):
-            messagebox.showwarning("Nothing to update",
-                "Choose at least one action: group, proxy, or location.")
-            return
-
-        group_id = None
-        if group_name:
-            m = [g for g in self._host_groups_all if g["name"] == group_name]
-            if not m:
-                messagebox.showerror("Not found",
-                    f"Group '{group_name}' not found — click ↻ Load.")
-                return
-            group_id = m[0]["groupid"]
-
-        proxy_id = None
-        if proxy_name:
-            m = [p for p in self._proxies_all if p["name"] == proxy_name]
-            if not m:
-                messagebox.showerror("Not found",
-                    f"Proxy '{proxy_name}' not found — click ↻ Load.")
-                return
-            proxy_id = m[0]["proxyid"]
-
-        parts = []
-        if group_name:  parts.append(f"add to '{group_name}'")
-        if proxy_name:  parts.append(f"proxy → '{proxy_name}'")
-        if lat and lng: parts.append(f"location ({lat}, {lng})")
-
-        if not messagebox.askyesno("Confirm",
-            f"Apply to {len(selected_ids)} host(s):\n\n• "
-            + "\n• ".join(parts) + "\n\nProceed?"):
-            return
-
-        def _worker():
-            try:
-                ob = Onboarder(self.api,
-                    lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv)))
-                ob.mass_update_hosts(selected_ids, group_id,
-                                     proxy_id, lat, lng)
-                self.after(500, self._search_hosts)   # refresh table
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Mass update failed: {e}", "ERR"))
-                self.after(0, lambda: messagebox.showerror(
-                    "Mass update failed", str(e)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
