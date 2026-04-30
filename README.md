@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 

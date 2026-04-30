@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.0
+EDAO-NMS Onboarding Tool v2.1
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -220,7 +220,7 @@ class Onboarder:
     # ── Step 4: Mass-update hosts ─────────────────────────────────────────
 
     def mass_update_hosts(self, host_ids: list, add_group_id: Optional[str],
-                          proxy_id: Optional[str], latitude: str, longitude: str):
+                          proxy_id: Optional[str]):
         if not host_ids:
             self._log("No hosts selected — nothing to update.", "WARN")
             return
@@ -236,17 +236,10 @@ class Onboarder:
         if proxy_id:
             update["monitored_by"] = 1
             update["proxyid"]      = proxy_id
-        if latitude and longitude:
-            update["inventory_mode"] = 0
-            update["inventory"] = {
-                "location_lat": latitude,
-                "location_lon": longitude,
-            }
         if len(update) > 1:
             self.api.call("host.massupdate", update)
             parts = []
-            if proxy_id:               parts.append(f"proxy id={proxy_id}")
-            if latitude and longitude: parts.append(f"location ({latitude}, {longitude})")
+            if proxy_id: parts.append(f"proxy id={proxy_id}")
             self._log(f"Updated {n} host(s): {', '.join(parts)}")
 
         self._log(f"Mass update complete for {n} host(s).", "OK")
@@ -264,7 +257,7 @@ class Onboarder:
     def run(self, msp: str, customer: str, site: str,
             proxy_ip: str, ip_range: str,
             use_icmp: bool, use_snmp: bool, snmp_community: str, use_agent: bool,
-            template_ids: list, latitude: str, longitude: str) -> dict:
+            template_ids: list) -> dict:
         r = {}
         self._log("═" * 52)
         self._log(f"Onboarding  MSP={msp}  Customer={customer}  Site={site}")
@@ -291,10 +284,7 @@ class Onboarder:
         self._log(f"  Group 2     : MSP/{msp}/{customer}/{site}  (id={r['gid2']})")
         self._log(f"  Disc. rule  : Proxy-{customer}-{site}       (id={r['drule_id']})")
         self._log(f"  Disc. action: Discovery{customer}-{site}    (id={r['action_id']})")
-        if latitude and longitude:
-            self._log(f"  Location    : {latitude}, {longitude}  "
-                      "(apply via Hosts tab → Mass Update)")
-        self._log("Next: use the Hosts tab to mass-assign discovered hosts.")
+        self._log("Next: use the PSK Config tab to configure encryption on the proxy.")
         self._log("Then: install proxy on-site and apply PSK via the PSK Config tab.")
         return r
 
@@ -313,7 +303,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.0")
+        self.title("EDAO-NMS Onboarding Tool  v2.1")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -589,6 +579,21 @@ class App(tk.Tk):
                     row=row, column=2, sticky=W, padx=6)
             row += 1
 
+        # ── Import from TXT ──────────────────────────────────────────────
+        imp_frame = tk.Frame(inner, bg="#e8f0fe", bd=1, relief="solid")
+        imp_frame.grid(row=row, column=0, columnspan=3,
+                       sticky=W+E, padx=16, pady=(12, 4))
+        row += 1
+        tk.Label(imp_frame,
+                 text="📄  Auto-fill all fields from customer TXT file",
+                 font=FONT_HEAD, bg="#e8f0fe").pack(side=LEFT, padx=12, pady=8)
+        ttk.Button(imp_frame, text="📂  Browse & Import TXT…",
+                   command=self._import_onboard_txt).pack(side=LEFT, padx=8, pady=8)
+        self._import_status_lbl = tk.Label(imp_frame, text="",
+                                            font=FONT_SMALL, fg="#007acc",
+                                            bg="#e8f0fe")
+        self._import_status_lbl.pack(side=LEFT, padx=8)
+
         # ── Section 1: Customer Info ──
         section("1 · Customer Info")
         self._msp_var      = StringVar()
@@ -646,15 +651,8 @@ class App(tk.Tk):
         self._snmp_entry.grid(row=row, column=1, sticky=W, pady=5)
         row += 1
 
-        # ── Section 4: Location ──
-        section("4 · Location  (Inventory)")
-        self._lat_var = StringVar()
-        self._lng_var = StringVar()
-        field("Latitude:",  self._lat_var, "e.g.  40.7128")
-        field("Longitude:", self._lng_var, "e.g.  -74.0060")
-
-        # ── Section 5: Templates ──
-        section("5 · Templates to Link")
+        # ── Section 4: Templates ──
+        section("4 · Templates to Link")
         ttk.Button(inner, text="Fetch Available Templates",
                    command=self._fetch_templates).grid(
             row=row, column=0, columnspan=2, sticky=W, padx=16, pady=(0, 6))
@@ -840,6 +838,51 @@ class App(tk.Tk):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _import_onboard_txt(self):
+        """Parse the customer TXT file and auto-fill all onboarding + PSK fields."""
+        path = filedialog.askopenfilename(
+            title="Select customer site TXT file",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            content = open(path, encoding="utf-8", errors="replace").read()
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot read file: {e}")
+            return
+
+        def find(pattern):
+            m = re.search(pattern, content, re.IGNORECASE)
+            return m.group(1).strip() if m else ""
+
+        msp        = find(r"MSP Name\s*:\s*(.+)")
+        customer   = find(r"Customer Name\s*:\s*(.+)")
+        site       = find(r"Site Name\s*:\s*(.+)")
+        public_ip  = find(r"Public IP\s*:\s*(.+)")
+        subnet     = find(r"Monitoring Subnet\s*:\s*(.+)")
+        psk_id     = find(r"PSK Identity\s*:\s*(.+)")
+        psk_key    = find(r"PSK Key\s*:\s*([0-9a-fA-F]{16,})")
+
+        filled = []
+        if msp:       self._msp_var.set(msp);           filled.append("MSP Name")
+        if customer:  self._customer_var.set(customer);  filled.append("Customer Name")
+        if site:      self._site_var.set(site);          filled.append("Site Name")
+        if public_ip: self._proxy_ip_var.set(public_ip); filled.append("Public IP")
+        if subnet:    self._ip_range_var.set(subnet);    filled.append("Monitoring Subnet")
+        if psk_id:    self._psk_identity_var.set(psk_id); filled.append("PSK Identity")
+        if psk_key:   self._psk_var.set(psk_key);         filled.append("PSK Key")
+
+        if filled:
+            fname = os.path.basename(path)
+            self._import_status_lbl.configure(
+                text=f"✔ Imported from {fname}  ({len(filled)} fields filled)",
+                fg="#007acc")
+            self._log(f"TXT import: {', '.join(filled)}", "OK")
+        else:
+            messagebox.showwarning("Nothing found",
+                "Could not detect any fields in this file.\n"
+                "Make sure it matches the expected format.")
+
     def _populate_templates(self):
         self._tmpl_list.delete(0, END)
         default_name = "EDAO-ICMP Ping"
@@ -859,8 +902,6 @@ class App(tk.Tk):
         site     = self._site_var.get().strip()
         proxy_ip = self._proxy_ip_var.get().strip()
         ip_range = self._ip_range_var.get().strip()
-        lat      = self._lat_var.get().strip()
-        lng      = self._lng_var.get().strip()
         snmp_c   = self._snmp_comm.get().strip() or "public"
 
         errors = []
@@ -905,7 +946,6 @@ class App(tk.Tk):
                     snmp_community=snmp_c,
                     use_agent=self._use_agent.get(),
                     template_ids=template_ids,
-                    latitude=lat, longitude=lng,
                 )
                 self._onboard_results = r
                 self.after(0, lambda: messagebox.showinfo(
