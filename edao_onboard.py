@@ -869,6 +869,8 @@ class App(tk.Tk):
         def _worker():
             try:
                 api = ZabbixAPI(url)
+                # apiinfo.version must be called WITHOUT auth header — always first
+                ver = api.api_version()
                 if mode == "token":
                     tok = self._token_var.get().strip()
                     if not tok:
@@ -876,9 +878,7 @@ class App(tk.Tk):
                             "Missing", "Please enter an API token."))
                         return
                     api.use_token(tok)
-                    # Validate token by calling apiinfo (no auth needed) then user.get
-                    ver = api.api_version()
-                    # Try a privileged call to confirm token works
+                    # Verify token works with a privileged read call
                     api.call("hostgroup.get", output=["groupid"], limit=1)
                     info = f"Server : {url}\nAPI ver: {ver}\nAuth   : API Token"
                 else:
@@ -889,7 +889,6 @@ class App(tk.Tk):
                             "Missing", "Enter username and password."))
                         return
                     api.login(user, pwd)
-                    ver  = api.api_version()
                     info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
 
                 self.api = api
