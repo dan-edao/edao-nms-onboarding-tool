@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.2  
+**Version:** 2.3  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,12 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.3 — 2026-04-30
+- Connection tab redesigned: content centred, tighter layout
+- Onboarding tab: reduced section/field spacing for less scrolling
+- Template filter now starts empty (shows all templates after fetch)
+- Multi-select hint updated to be clearer
 
 ### v2.2 — 2026-04-30
 - PSK Encryption moved into Onboarding tab (section 3) — no more separate PSK Config tab
