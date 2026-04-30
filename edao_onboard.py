@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v1.8
+EDAO-NMS Onboarding Tool v1.9
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -313,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v1.8")
+        self.title("EDAO-NMS Onboarding Tool  v1.9")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -556,6 +556,7 @@ class App(tk.Tk):
         row += 1
         for v in (self._msp_var, self._customer_var, self._site_var):
             v.trace_add("write", lambda *_: self._update_preview())
+            v.trace_add("write", self._update_psk_proxy_label)
 
         # ── Section 2: Network ──
         section("2 · Network")
@@ -636,16 +637,12 @@ class App(tk.Tk):
                  font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
                                       sticky=W, padx=16, pady=(16, 8))
 
+        # Proxy name is derived live from the Onboarding tab inputs
         tk.Label(f, text="Proxy:", font=FONT_LABEL, anchor=E).grid(
             row=1, column=0, sticky=E, padx=(16, 6), pady=8)
-        self._psk_proxy_var = StringVar()
-        self._psk_proxy_cb  = ttk.Combobox(f, textvariable=self._psk_proxy_var,
-                                            font=FONT_ENTRY, width=38,
-                                            state="readonly")
-        self._psk_proxy_cb.grid(row=1, column=1, sticky=W, pady=8)
-        ttk.Button(f, text="↻ Refresh",
-                   command=self._refresh_proxies).grid(
-            row=1, column=2, sticky=W, padx=6, pady=8)
+        self._psk_proxy_name_lbl = tk.Label(f, text="— fill in Onboarding tab first —",
+                                             font=FONT_ENTRY, fg="#007acc", anchor=W)
+        self._psk_proxy_name_lbl.grid(row=1, column=1, columnspan=2, sticky=W, pady=8)
 
         tk.Label(f, text="PSK Identity:", font=FONT_LABEL, anchor=E).grid(
             row=2, column=0, sticky=E, padx=(16, 6), pady=8)
@@ -879,26 +876,16 @@ class App(tk.Tk):
 
     # ── PSK Config callbacks ──────────────────────────────────────────────
 
-    def _refresh_proxies(self):
-        if not self._connected or not self.api:
-            messagebox.showwarning("Not connected", "Please connect first.")
-            return
-
-        def _worker():
-            try:
-                proxies = self.api.call("proxy.get",
-                    output=["proxyid", "name"], sortfield="name")
-                names = [p["name"] for p in proxies]
-                self._proxy_map = {p["name"]: p["proxyid"] for p in proxies}
-                self.after(0, lambda: self._psk_proxy_cb.configure(values=names))
-                self.after(0, lambda: self._log(
-                    f"Loaded {len(proxies)} proxies.", "OK"))
-            except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Failed to fetch proxies: {e}", "ERR"))
-
-        self._proxy_map = {}
-        threading.Thread(target=_worker, daemon=True).start()
+    def _update_psk_proxy_label(self, *_):
+        """Keep the PSK tab proxy label in sync with Onboarding tab fields."""
+        customer = self._customer_var.get().strip()
+        site     = self._site_var.get().strip()
+        if customer or site:
+            self._psk_proxy_name_lbl.configure(
+                text=f"Proxy{customer}{site}", fg="#007acc")
+        else:
+            self._psk_proxy_name_lbl.configure(
+                text="— fill in Onboarding tab first —", fg="#888")
 
     def _import_txt(self):
         path = filedialog.askopenfilename(
@@ -931,12 +918,19 @@ class App(tk.Tk):
         if not self._connected or not self.api:
             messagebox.showwarning("Not connected", "Please connect first.")
             return
-        proxy_name = self._psk_proxy_var.get().strip()
-        identity   = self._psk_identity_var.get().strip()
-        psk        = self._psk_var.get().strip()
-        if not proxy_name:
-            messagebox.showwarning("Missing", "Please select a proxy.")
+
+        # Derive proxy name from Onboarding tab fields
+        customer   = self._customer_var.get().strip()
+        site       = self._site_var.get().strip()
+        proxy_name = f"Proxy{customer}{site}"
+
+        if not customer or not site:
+            messagebox.showwarning("Missing",
+                "Fill in Customer Name and Site Name on the Onboarding tab first.")
             return
+
+        identity = self._psk_identity_var.get().strip()
+        psk      = self._psk_var.get().strip()
         if not identity or not psk:
             messagebox.showwarning("Missing",
                 "PSK Identity and PSK are both required.")
@@ -945,14 +939,17 @@ class App(tk.Tk):
             messagebox.showwarning("Invalid PSK",
                 "PSK must be a hexadecimal string.")
             return
-        proxy_id = getattr(self, "_proxy_map", {}).get(proxy_name)
-        if not proxy_id:
-            messagebox.showerror("Error",
-                f"Proxy ID not found for '{proxy_name}'. Try refreshing.")
-            return
 
         def _worker():
             try:
+                # Look up the proxy ID by name
+                proxy_id = self.api.get_proxy_id(proxy_name)
+                if not proxy_id:
+                    self.after(0, lambda: messagebox.showerror(
+                        "Proxy not found",
+                        f"No proxy named '{proxy_name}' found in EDAO-NMS.\n"
+                        "Run the Onboarding step first."))
+                    return
                 ob = Onboarder(self.api,
                     lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv)))
                 ob.configure_psk(proxy_id, identity, psk)
