@@ -439,22 +439,67 @@ class App(tk.Tk):
                       show="*" if hide else "").grid(
                 row=2+i, column=1, columnspan=2, sticky=W, padx=6, pady=6)
 
+        # ── Advanced / API Token (collapsed by default) ───────────────────
+        self._adv_open    = BooleanVar(value=False)
+        self._token_var   = StringVar()
+        adv_hdr = tk.Frame(f)
+        adv_hdr.grid(row=4, column=0, columnspan=3, sticky=W, padx=16, pady=(8, 0))
+        self._adv_toggle_btn = tk.Label(
+            adv_hdr, text="▶  Advanced (API Token)",
+            font=FONT_SMALL, fg="#888", cursor="hand2")
+        self._adv_toggle_btn.pack(side=LEFT)
+        self._adv_toggle_btn.bind("<Button-1>", self._toggle_advanced)
+
+        self._adv_frame = tk.Frame(f)
+        self._adv_frame.grid(row=5, column=0, columnspan=3,
+                              sticky=W+E, padx=16, pady=(0, 4))
+        self._adv_frame.grid_remove()   # hidden by default
+        tk.Label(self._adv_frame, text="API Token:",
+                 font=FONT_LABEL, anchor=E, width=14).grid(
+            row=0, column=0, sticky=E, pady=4)
+        self._token_entry = ttk.Entry(self._adv_frame, textvariable=self._token_var,
+                                      font=FONT_ENTRY, width=44, show="*")
+        self._token_entry.grid(row=0, column=1, sticky=W, padx=6, pady=4)
+        ttk.Button(self._adv_frame, text="👁",
+                   command=self._toggle_token_vis).grid(
+            row=0, column=2, sticky=W, padx=4)
+        self._token_shown = False
+        tk.Label(self._adv_frame,
+                 text="Use an API Token if your account is temporarily blocked.",
+                 font=FONT_SMALL, fg="#888").grid(
+            row=1, column=0, columnspan=3, sticky=W, pady=(0, 4))
+
         # Buttons
         btn_frame = tk.Frame(f)
-        btn_frame.grid(row=4, column=0, columnspan=3, pady=16)
-        ttk.Button(btn_frame, text="Test & Connect",
-                   command=self._do_connect).pack(side=LEFT, padx=8)
+        btn_frame.grid(row=6, column=0, columnspan=3, pady=16)
+        self._connect_btn = ttk.Button(btn_frame, text="Test & Connect",
+                                       command=self._do_connect)
+        self._connect_btn.pack(side=LEFT, padx=8)
         ttk.Button(btn_frame, text="Disconnect",
                    command=self._do_disconnect).pack(side=LEFT, padx=8)
 
         # Info box
         info = ttk.LabelFrame(f, text="  ℹ  Connection Info", padding=8)
-        info.grid(row=5, column=0, columnspan=3,
+        info.grid(row=7, column=0, columnspan=3,
                   sticky=W+E, padx=16, pady=8)
         self._api_info_lbl = tk.Label(info, text="Not connected.",
                                       font=FONT_SMALL, justify=LEFT, anchor=W)
         self._api_info_lbl.grid(row=0, column=0, sticky=W)
         f.columnconfigure(1, weight=1)
+
+    def _toggle_advanced(self, _event=None):
+        if self._adv_open.get():
+            self._adv_frame.grid_remove()
+            self._adv_toggle_btn.configure(text="▶  Advanced (API Token)")
+            self._adv_open.set(False)
+        else:
+            self._adv_frame.grid()
+            self._adv_toggle_btn.configure(text="▼  Advanced (API Token)")
+            self._adv_open.set(True)
+
+    def _toggle_token_vis(self):
+        self._token_shown = not self._token_shown
+        self._token_entry.configure(show="" if self._token_shown else "*")
 
     # ── Onboarding tab ────────────────────────────────────────────────────
 
@@ -814,34 +859,63 @@ class App(tk.Tk):
     # ── Connection callbacks ──────────────────────────────────────────────
 
     def _do_connect(self):
-        url  = self._url_var.get().strip()
+        url = self._url_var.get().strip()
         if not url:
             messagebox.showwarning("Missing", "Please enter the server URL.")
             return
 
+        # Disable button while connecting to prevent double-clicks / re-lockout
+        self._connect_btn.configure(state="disabled", text="Connecting…")
+
+        token = self._token_var.get().strip()   # filled only if Advanced is used
+        user  = self._user_var.get().strip()
+        pwd   = self._pwd_var.get()
+
+        def _re_enable():
+            self._connect_btn.configure(state="normal", text="Test & Connect")
+
         def _worker():
             try:
-                api  = ZabbixAPI(url)
+                api = ZabbixAPI(url)
                 # apiinfo.version must be called WITHOUT auth header — always first
-                ver  = api.api_version()
-                user = self._user_var.get().strip()
-                pwd  = self._pwd_var.get()
-                if not user or not pwd:
-                    self.after(0, lambda: messagebox.showwarning(
-                        "Missing", "Enter your EDAO-NMS username and password."))
-                    return
-                api.login(user, pwd)
-                info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
+                ver = api.api_version()
+
+                if token:
+                    # Advanced: API Token path (bypasses brute-force lockout)
+                    api.use_token(token)
+                    api.call("hostgroup.get", output=["groupid"], limit=1)
+                    info = f"Server : {url}\nAPI ver: {ver}\nAuth   : API Token"
+                    auth_label = "API Token"
+                else:
+                    if not user or not pwd:
+                        self.after(0, lambda: messagebox.showwarning(
+                            "Missing", "Enter your EDAO-NMS username and password."))
+                        self.after(0, _re_enable)
+                        return
+                    api.login(user, pwd)
+                    info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
+                    auth_label = user
+
                 self.api = api
                 self.after(0, lambda: self._set_connected(True, info))
                 self.after(0, lambda: self._log(
-                    f"Connected to {url}  (EDAO-NMS v{ver})", "OK"))
+                    f"Connected to {url}  (EDAO-NMS v{ver})  [{auth_label}]", "OK"))
                 self._save_config()
+                self.after(0, _re_enable)
             except Exception as e:
                 self.after(0, lambda: self._set_connected(False))
-                self.after(0, lambda: self._log(f"Connection failed: {e}", "ERR"))
+                err = str(e)
+                self.after(0, lambda: self._log(f"Connection failed: {err}", "ERR"))
+                # Give a clear hint if account is blocked
+                hint = ""
+                if "blocked" in err.lower():
+                    hint = ("\n\nThe account is temporarily blocked by EDAO-NMS.\n"
+                            "Fix: Log into the EDAO-NMS web UI as a different admin,\n"
+                            "go to Administration → Users, find the user and click Unblock.\n\n"
+                            "Or use an API Token in the Advanced section below.")
                 self.after(0, lambda: messagebox.showerror(
-                    "Connection failed", str(e)))
+                    "Connection failed", err + hint))
+                self.after(0, _re_enable)
 
         threading.Thread(target=_worker, daemon=True).start()
 
