@@ -335,8 +335,8 @@ class App(tk.Tk):
             try:
                 cfg = json.loads(open(CONFIG_PATH).read())
                 self._url_var.set(cfg.get("url",      DEFAULT_URL))
-                self._user_var.set(cfg.get("username", ""))
-                self._auth_mode.set(cfg.get("auth_mode", "token"))
+                self._user_var.set(cfg.get("username", "dan@edaogroup.io"))
+                self._auth_mode.set(cfg.get("auth_mode", "userpass"))
             except Exception:
                 pass
 
@@ -405,7 +405,7 @@ class App(tk.Tk):
                                       sticky=W, padx=16, pady=(16, 8))
 
         self._url_var   = StringVar(value=DEFAULT_URL)
-        self._auth_mode = StringVar(value="token")   # "token" | "userpass"
+        self._auth_mode = StringVar(value="userpass")   # "token" | "userpass"
 
         # Server URL
         tk.Label(f, text="Server URL:", font=FONT_LABEL, anchor=E).grid(
@@ -441,7 +441,7 @@ class App(tk.Tk):
         self._userpass_frame = tk.Frame(f)
         self._userpass_frame.grid(row=4, column=0, columnspan=3,
                                    sticky=W+E, padx=16, pady=4)
-        self._user_var = StringVar()
+        self._user_var = StringVar(value="dan@edaogroup.io")
         self._pwd_var  = StringVar()
         for i, (lbl, var, hide) in enumerate([
             ("Username:", self._user_var, False),
