@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,13 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.2 — 2026-04-30
+- PSK Encryption moved into Onboarding tab (section 3) — no more separate PSK Config tab
+- Run Full Onboarding now includes PSK as Step 5 (skipped gracefully if fields are empty)
+- Template list now has a live filter box (default: "EDAO") with a Clear button
+- "IP Range" label renamed to "Monitoring Subnet"
+- Location (Inventory) latitude/longitude fields removed
 
 ### v2.0 — 2026-04-30
 - Connection tab: New Site / Existing Site selector after connecting
