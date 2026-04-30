@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v1.6
+EDAO-NMS Onboarding Tool v1.7
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime
 from typing import Optional
 from tkinter import (
-    END, LEFT, RIGHT, BOTH, X, Y, W, E,
+    END, EXTENDED, LEFT, RIGHT, BOTH, X, Y, W, E,
     BooleanVar, StringVar,
     filedialog, messagebox, scrolledtext,
 )
@@ -313,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v1.6")
+        self.title("EDAO-NMS Onboarding Tool  v1.7")
         self.resizable(True, True)
         self.minsize(900, 760)
 
@@ -331,17 +331,29 @@ class App(tk.Tk):
         if os.path.exists(CONFIG_PATH):
             try:
                 cfg = json.loads(open(CONFIG_PATH).read())
-                self._url_var.set(cfg.get("url",      DEFAULT_URL))
-                self._user_var.set(cfg.get("username", ""))
+                self._url_var.set(cfg.get("url",       DEFAULT_URL))
+                self._user_var.set(cfg.get("username",  ""))
+                self._auth_mode.set(cfg.get("auth_mode", "userpass"))
+                saved_tok = cfg.get("api_token", "")
+                if saved_tok:
+                    self._token_var.set(saved_tok)
+                    self._saved_token_lbl.configure(
+                        text="✔ Token saved", fg="#4ec9b0")
+                self._toggle_auth_mode()
             except Exception:
                 pass
 
     def _save_config(self):
         try:
-            json.dump({
-                "url":      self._url_var.get(),
-                "username": self._user_var.get(),
-            }, open(CONFIG_PATH, "w"))
+            data = {
+                "url":       self._url_var.get(),
+                "username":  self._user_var.get(),
+                "auth_mode": self._auth_mode.get(),
+            }
+            # Only persist the token if the user explicitly saved it
+            if self._token_saved:
+                data["api_token"] = self._token_var.get()
+            json.dump(data, open(CONFIG_PATH, "w"))
         except Exception:
             pass
 
@@ -403,7 +415,11 @@ class App(tk.Tk):
                  font=FONT_HEAD).grid(row=0, column=0, columnspan=3,
                                       sticky=W, padx=16, pady=(16, 8))
 
-        self._url_var  = StringVar(value=DEFAULT_URL)
+        self._url_var   = StringVar(value=DEFAULT_URL)
+        self._auth_mode = StringVar(value="userpass")
+        self._token_var = StringVar()
+        self._token_shown = False
+        self._token_saved = False   # tracks whether token was explicitly saved
 
         # Server URL
         tk.Label(f, text="Server URL:", font=FONT_LABEL, anchor=E).grid(
@@ -412,52 +428,67 @@ class App(tk.Tk):
                   font=FONT_ENTRY, width=44).grid(
             row=1, column=1, columnspan=2, sticky=W, pady=6)
 
-        # Username / Password
+        # Auth method radio buttons
+        mode_frame = tk.Frame(f)
+        mode_frame.grid(row=2, column=0, columnspan=3, sticky=W, padx=16, pady=(10, 4))
+        tk.Label(mode_frame, text="Auth method:", font=FONT_LABEL).pack(side=LEFT, padx=(0, 14))
+        ttk.Radiobutton(mode_frame, text="Username / Password",
+                        variable=self._auth_mode, value="userpass",
+                        command=self._toggle_auth_mode).pack(side=LEFT, padx=6)
+        ttk.Radiobutton(mode_frame, text="API Token",
+                        variable=self._auth_mode, value="token",
+                        command=self._toggle_auth_mode).pack(side=LEFT, padx=6)
+
+        # ── Username / Password frame ─────────────────────────────────────
+        self._userpass_frame = tk.Frame(f)
+        self._userpass_frame.grid(row=3, column=0, columnspan=3,
+                                   sticky=W+E, padx=16, pady=4)
         self._user_var = StringVar(value="")
         self._pwd_var  = StringVar()
         for i, (lbl, var, hide) in enumerate([
             ("Username:", self._user_var, False),
             ("Password:", self._pwd_var,  True),
         ]):
-            tk.Label(f, text=lbl, font=FONT_LABEL, anchor=E, width=14).grid(
-                row=2+i, column=0, sticky=E, padx=(16, 6), pady=6)
-            ttk.Entry(f, textvariable=var, font=FONT_ENTRY, width=40,
+            tk.Label(self._userpass_frame, text=lbl,
+                     font=FONT_LABEL, anchor=E, width=14).grid(
+                row=i, column=0, sticky=E, pady=5)
+            ttk.Entry(self._userpass_frame, textvariable=var,
+                      font=FONT_ENTRY, width=40,
                       show="*" if hide else "").grid(
-                row=2+i, column=1, columnspan=2, sticky=W, padx=6, pady=6)
+                row=i, column=1, sticky=W, padx=6, pady=5)
 
-        # ── Advanced / API Token (collapsed by default) ───────────────────
-        self._adv_open    = BooleanVar(value=False)
-        self._token_var   = StringVar()
-        adv_hdr = tk.Frame(f)
-        adv_hdr.grid(row=4, column=0, columnspan=3, sticky=W, padx=16, pady=(8, 0))
-        self._adv_toggle_btn = tk.Label(
-            adv_hdr, text="▶  Advanced (API Token)",
-            font=FONT_SMALL, fg="#888", cursor="hand2")
-        self._adv_toggle_btn.pack(side=LEFT)
-        self._adv_toggle_btn.bind("<Button-1>", self._toggle_advanced)
-
-        self._adv_frame = tk.Frame(f)
-        self._adv_frame.grid(row=5, column=0, columnspan=3,
-                              sticky=W+E, padx=16, pady=(0, 4))
-        self._adv_frame.grid_remove()   # hidden by default
-        tk.Label(self._adv_frame, text="API Token:",
+        # ── API Token frame ───────────────────────────────────────────────
+        self._token_frame = tk.Frame(f)
+        self._token_frame.grid(row=3, column=0, columnspan=3,
+                                sticky=W+E, padx=16, pady=4)
+        tk.Label(self._token_frame, text="API Token:",
                  font=FONT_LABEL, anchor=E, width=14).grid(
-            row=0, column=0, sticky=E, pady=4)
-        self._token_entry = ttk.Entry(self._adv_frame, textvariable=self._token_var,
-                                      font=FONT_ENTRY, width=44, show="*")
-        self._token_entry.grid(row=0, column=1, sticky=W, padx=6, pady=4)
-        ttk.Button(self._adv_frame, text="👁",
+            row=0, column=0, sticky=E, pady=5)
+        self._token_entry = ttk.Entry(self._token_frame,
+                                      textvariable=self._token_var,
+                                      font=FONT_ENTRY, width=40, show="*")
+        self._token_entry.grid(row=0, column=1, sticky=W, padx=6, pady=5)
+        ttk.Button(self._token_frame, text="👁  Show / Hide",
                    command=self._toggle_token_vis).grid(
             row=0, column=2, sticky=W, padx=4)
-        self._token_shown = False
-        tk.Label(self._adv_frame,
-                 text="Use an API Token if your account is temporarily blocked.",
-                 font=FONT_SMALL, fg="#888").grid(
-            row=1, column=0, columnspan=3, sticky=W, pady=(0, 4))
 
-        # Buttons
+        # Save / Replace / Clear buttons
+        tok_btn_row = tk.Frame(self._token_frame)
+        tok_btn_row.grid(row=1, column=0, columnspan=3, sticky=W, pady=(2, 6))
+        ttk.Button(tok_btn_row, text="💾  Save Token",
+                   command=self._save_token).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(tok_btn_row, text="🔄  Replace Token",
+                   command=self._replace_token).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(tok_btn_row, text="✕  Clear Token",
+                   command=self._clear_token).pack(side=LEFT)
+        self._saved_token_lbl = tk.Label(self._token_frame, text="No token saved.",
+                                         font=FONT_SMALL, fg="#888")
+        self._saved_token_lbl.grid(row=2, column=0, columnspan=3,
+                                    sticky=W, pady=(0, 4))
+
+        # ── Connect / Disconnect buttons ──────────────────────────────────
         btn_frame = tk.Frame(f)
-        btn_frame.grid(row=6, column=0, columnspan=3, pady=16)
+        btn_frame.grid(row=4, column=0, columnspan=3, pady=16)
         self._connect_btn = ttk.Button(btn_frame, text="Test & Connect",
                                        command=self._do_connect)
         self._connect_btn.pack(side=LEFT, padx=8)
@@ -466,26 +497,53 @@ class App(tk.Tk):
 
         # Info box
         info = ttk.LabelFrame(f, text="  ℹ  Connection Info", padding=8)
-        info.grid(row=7, column=0, columnspan=3,
+        info.grid(row=5, column=0, columnspan=3,
                   sticky=W+E, padx=16, pady=8)
         self._api_info_lbl = tk.Label(info, text="Not connected.",
                                       font=FONT_SMALL, justify=LEFT, anchor=W)
         self._api_info_lbl.grid(row=0, column=0, sticky=W)
         f.columnconfigure(1, weight=1)
 
-    def _toggle_advanced(self, _event=None):
-        if self._adv_open.get():
-            self._adv_frame.grid_remove()
-            self._adv_toggle_btn.configure(text="▶  Advanced (API Token)")
-            self._adv_open.set(False)
+        self._toggle_auth_mode()   # set initial visibility
+
+    def _toggle_auth_mode(self):
+        if self._auth_mode.get() == "token":
+            self._userpass_frame.grid_remove()
+            self._token_frame.grid()
         else:
-            self._adv_frame.grid()
-            self._adv_toggle_btn.configure(text="▼  Advanced (API Token)")
-            self._adv_open.set(True)
+            self._token_frame.grid_remove()
+            self._userpass_frame.grid()
 
     def _toggle_token_vis(self):
         self._token_shown = not self._token_shown
         self._token_entry.configure(show="" if self._token_shown else "*")
+
+    def _save_token(self):
+        tok = self._token_var.get().strip()
+        if not tok:
+            messagebox.showwarning("Empty", "Enter an API token first.")
+            return
+        self._token_saved = True
+        self._save_config()
+        self._saved_token_lbl.configure(text="✔ Token saved", fg="#4ec9b0")
+        self._log("API token saved to local config.", "OK")
+
+    def _replace_token(self):
+        """Clear the entry so the user can type a new token, then re-save."""
+        self._token_var.set("")
+        self._token_shown = True
+        self._token_entry.configure(show="")
+        self._saved_token_lbl.configure(text="Enter new token and click Save Token.", fg="#dcdcaa")
+        self._token_entry.focus_set()
+
+    def _clear_token(self):
+        self._token_var.set("")
+        self._token_saved = False
+        self._token_shown = False
+        self._token_entry.configure(show="*")
+        self._save_config()
+        self._saved_token_lbl.configure(text="No token saved.", fg="#888")
+        self._log("API token cleared.", "WARN")
 
     # ── Onboarding tab ────────────────────────────────────────────────────
 
@@ -719,17 +777,14 @@ class App(tk.Tk):
     # ── Connection callbacks ──────────────────────────────────────────────
 
     def _do_connect(self):
-        url = self._url_var.get().strip()
+        url  = self._url_var.get().strip()
+        mode = self._auth_mode.get()
         if not url:
             messagebox.showwarning("Missing", "Please enter the server URL.")
             return
 
         # Disable button while connecting to prevent double-clicks / re-lockout
         self._connect_btn.configure(state="disabled", text="Connecting…")
-
-        token = self._token_var.get().strip()   # filled only if Advanced is used
-        user  = self._user_var.get().strip()
-        pwd   = self._pwd_var.get()
 
         def _re_enable():
             self._connect_btn.configure(state="normal", text="Test & Connect")
@@ -740,20 +795,27 @@ class App(tk.Tk):
                 # apiinfo.version must be called WITHOUT auth header — always first
                 ver = api.api_version()
 
-                if token:
-                    # Advanced: API Token path (bypasses brute-force lockout)
-                    api.use_token(token)
+                if mode == "token":
+                    tok = self._token_var.get().strip()
+                    if not tok:
+                        self.after(0, lambda: messagebox.showwarning(
+                            "Missing", "Enter or save an API Token first."))
+                        self.after(0, _re_enable)
+                        return
+                    api.use_token(tok)
                     api.call("hostgroup.get", output=["groupid"], limit=1)
-                    info = f"Server : {url}\nAPI ver: {ver}\nAuth   : API Token"
+                    info       = f"Server : {url}\nAPI ver: {ver}\nAuth   : API Token"
                     auth_label = "API Token"
                 else:
+                    user = self._user_var.get().strip()
+                    pwd  = self._pwd_var.get()
                     if not user or not pwd:
                         self.after(0, lambda: messagebox.showwarning(
                             "Missing", "Enter your EDAO-NMS username and password."))
                         self.after(0, _re_enable)
                         return
                     api.login(user, pwd)
-                    info = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
+                    info       = f"Server : {url}\nAPI ver: {ver}\nUser   : {user}"
                     auth_label = user
 
                 self.api = api
@@ -766,13 +828,12 @@ class App(tk.Tk):
                 self.after(0, lambda: self._set_connected(False))
                 err = str(e)
                 self.after(0, lambda: self._log(f"Connection failed: {err}", "ERR"))
-                # Give a clear hint if account is blocked
                 hint = ""
                 if "blocked" in err.lower():
                     hint = ("\n\nThe account is temporarily blocked by EDAO-NMS.\n"
                             "Fix: Log into the EDAO-NMS web UI as a different admin,\n"
-                            "go to Administration → Users, find the user and click Unblock.\n\n"
-                            "Or use an API Token in the Advanced section below.")
+                            "go to Administration → Users, find the user → Unblock.\n\n"
+                            "Or switch to API Token auth on this tab.")
                 self.after(0, lambda: messagebox.showerror(
                     "Connection failed", err + hint))
                 self.after(0, _re_enable)
@@ -780,7 +841,7 @@ class App(tk.Tk):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _do_disconnect(self):
-        if self.api:
+        if self.api and self._auth_mode.get() == "userpass":
             self.api.logout()
         self.api = None
         self._set_connected(False)
