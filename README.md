@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,11 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v1.8 — 2026-04-30
+- Removed username/password auth entirely — API Token only
+- Connection tab simplified: Server URL + API Token field
+- Save / Replace / Clear Token buttons; token persists across sessions
 
 ### v1.7 — 2026-04-30
 - Fixed crash: `EXTENDED` import removed accidentally in v1.6, restored
