@@ -1,10 +1,10 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 1.1  
+**Version:** 1.4  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
-A cross-platform GUI tool that automates the full MSP / Customer / Site onboarding workflow in **Zabbix 7.x (EDAO-NMS)** via the Zabbix JSON-RPC API.
+A cross-platform GUI tool that automates the full MSP / Customer / Site onboarding workflow in **EDAO-NMS (Zabbix 7.x)** via the Zabbix JSON-RPC API.
 
 ---
 
@@ -15,7 +15,7 @@ The tool automates all 5 steps from the MSP Onboarding Guide:
 | Step | Action | API method |
 |------|--------|------------|
 | 1 | Create Proxy | `proxy.create` |
-| 2 | Create Host Groups (`MSP/{MSP}-Group/{Customer}` + `/{Site}`) | `hostgroup.create` |
+| 2 | Create Host Groups (`MSP/{MSP}/{Customer}` + `/{Site}`) | `hostgroup.create` |
 | 3a | Create Discovery Rule | `drule.create` |
 | 3b | Create Discovery Action (add host, assign groups, link templates, enable) | `action.create` |
 | 4 | Mass-update hosts — assign group, proxy, lat/lon inventory | `host.massadd` · `host.massupdate` |
@@ -25,11 +25,11 @@ The tool automates all 5 steps from the MSP Onboarding Guide:
 
 ## Naming Conventions
 
-| Object | Format | Example |
-|--------|--------|---------|
-| Proxy | `Proxy{MSP}{Customer}-{Site}` | `ProxyEDAOAcme-NYC` |
-| Host Group 1 | `MSP/{MSP}-Group/{Customer}` | `MSP/EDAO-Group/Acme` |
-| Host Group 2 | `MSP/{MSP}-Group/{Customer}/{Site}` | `MSP/EDAO-Group/Acme/NYC` |
+| Object | Format | Example (MSP=EDAO, Customer=Acme, Site=NYC) |
+|--------|--------|------|
+| Proxy | `Proxy{Customer}{Site}` | `ProxyAcmeNYC` |
+| Host Group 1 | `MSP/{MSP}/{Customer}` | `MSP/EDAO/Acme` |
+| Host Group 2 | `MSP/{MSP}/{Customer}/{Site}` | `MSP/EDAO/Acme/NYC` |
 | Discovery Rule | `Proxy-{Customer}-{Site}` | `Proxy-Acme-NYC` |
 | Discovery Action | `Discovery{Customer}-{Site}` | `DiscoveryAcme-NYC` |
 
@@ -61,36 +61,36 @@ python3 edao_onboard.py
 
 ## Authentication
 
-The tool supports two authentication methods:
+Enter your **EDAO-NMS username and password** — the same credentials you use to log into the EDAO-NMS web interface. The account must have Super Admin role with API access enabled.
 
-### API Token (recommended)
-1. In Zabbix UI → top-right username → **API tokens**
+> **Account blocked?** EDAO-NMS blocks an account after 5 failed login attempts.  
+> To unblock: log into the web UI as a different admin → Administration → Users → find the user → **Unblock**.  
+> Alternatively, expand **Advanced (API Token)** on the Connection tab and paste an API token to bypass the lockout.
+
+### Creating an API Token (optional fallback)
+1. In EDAO-NMS UI → top-right username → **API tokens**
 2. Click **Create API token** — set no expiry for a permanent token
-3. Paste the token into the **Connection** tab → **API Token** field
-
-### Username / Password
-Enter Zabbix credentials directly.  
-> **Note:** Zabbix blocks the account after 5 failed attempts. Use the API Token method if you hit lockout issues.
+3. Paste the token into the **Advanced (API Token)** field on the Connection tab
 
 ---
 
 ## Tabs
 
 ### 🔌 Connection
-- Set server URL, choose auth method, test connection.
+- Set server URL, enter username/password, test connection.
 - URL and username are saved between sessions.
+- **Advanced** section: paste an API Token as a fallback if the account is blocked.
 
 ### 🏢 Onboarding
 Fill in:
 - **MSP Name** — e.g. `EDAO`
-- **MSP Group Label** — auto-filled as `{MSP}-Group`, editable
 - **Customer Name** — e.g. `Acme`
 - **Site Name** — e.g. `NYC`
 - **Proxy Public IP** — public IP of the on-site proxy
 - **IP Range** — subnet for discovery (e.g. `192.168.1.0/24`)
-- **Discovery Checks** — ICMP Ping, SNMP (v1), Zabbix Agent
+- **Discovery Checks** — ICMP Ping, SNMP (v1), EDAO-NMS Agent
 - **Location** — latitude / longitude for inventory
-- **Templates** — fetch and multi-select templates to link
+- **Templates** — fetch and multi-select templates to link (defaults to `EDAO-ICMP Ping`)
 
 Live preview updates all object names as you type.  
 Click **▶ Run Full Onboarding** — a confirmation dialog shows exactly what will be created.
@@ -131,24 +131,40 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 
 ## Release History
 
+### v1.4 — 2026-04-30
+- Connect button disables during login to prevent repeat attempts that trigger brute-force lockout
+- Blocked-account error now shows step-by-step unblock instructions
+- Added collapsible **Advanced (API Token)** section as a lockout bypass fallback
+
+### v1.3 — 2026-04-30
+- Header redesigned: centered 2-line title (EDAO / NMS Onboarding Tool) with logo
+- API Token auth option removed — username/password only (matching EDAO-NMS web login)
+- All "Zabbix" UI labels replaced with "EDAO-NMS"
+- MSP Group Label field removed — group paths now `MSP/{MSP}/{Customer}/{Site}`
+- Proxy naming simplified to `Proxy{Customer}{Site}` (no MSP prefix)
+- Templates list auto-selects "EDAO-ICMP Ping" after fetch
+
+### v1.2 — 2026-04-30
+- Increased all font sizes for readability
+- Embedded EDAO Group logo in banner
+- Expanded minimum window size to 900×760
+
 ### v1.1 — 2026-04-30
 - Added API Token authentication (bypasses brute-force lockout)
 - Added MSP Group Label field (auto-fills as `{MSP}-Group`)
-- Fixed host group path to use `{MSP}-Group` convention
 - Fixed discovery action naming to `Discovery{Customer}-{Site}`
-- Fixed action condition to type 18 only (matches live server)
-- Fixed SNMP check to SNMPv1 type 10 (matches live discovery rules)
+- Fixed action condition to type 18 only
+- Fixed SNMP check to SNMPv1 type 10
 - Added Zabbix Agent check enabled by default
 - Added full **Hosts** tab — search, multi-select, mass update (group / proxy / location)
 
 ### v1.0 — 2026-04-30
-- Initial release
-- Steps 1–3 + PSK Config (Steps 1, 2, 3a, 3b, 5)
+- Initial release — Steps 1–3 + PSK Config
 
 ---
 
 ## Security Notes
 
-- The API token is stored in memory only during the session — never written to disk.
+- Credentials are held in memory only during the session — never written to disk.
 - Local config (`~/.edao_onboard_config.json`) saves only the server URL and username — never passwords or tokens.
 - TLS certificate verification is relaxed to support self-signed certs on internal NMS servers.
