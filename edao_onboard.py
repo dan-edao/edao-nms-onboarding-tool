@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.15
+NMS Proxy Onboarding Tool v2.16
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -444,7 +444,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.15")
+        self.title("NMS Proxy Onboarding Tool  v2.16")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
@@ -542,6 +542,29 @@ class App(tk.Tk):
                 if val:
                     var.set(val)
                     filled.append(key)
+            # v2.16 — Control Hub Maintenance tab now ships the global
+            # EDAO-NMS Zabbix API token inside the same payload. If
+            # present, set the Connection tab token field AND mark it
+            # saved so it persists in ~/.edao_onboard_config.json — the
+            # operator never has to paste it manually. The user can
+            # still override via the existing Replace / Clear buttons;
+            # the next Deploy Now! will overwrite again.
+            api_token = cfg.get("apiToken")
+            if api_token and isinstance(api_token, str) and api_token.strip():
+                self._token_var.set(api_token.strip())
+                self._token_saved = True
+                try:
+                    self._saved_token_lbl.configure(
+                        text="✔ Token saved (from Control Hub)", fg="#4ec9b0")
+                except Exception:
+                    pass
+                # Persist to disk so subsequent launches pick it up even
+                # without a fresh JSON download.
+                try:
+                    self._save_config()
+                except Exception:
+                    pass
+                filled.append("apiToken")
             if filled:
                 self._log(f"Loaded {len(filled)} field(s) from {os.path.basename(path)}: {', '.join(filled)}", "OK")
                 # Switch the user straight to the Onboarding tab so they
@@ -1178,6 +1201,26 @@ class App(tk.Tk):
                 self._tmpl_list.selection_set(pos)
                 self._tmpl_list.see(pos)
 
+    def _find_existing_entries(self, msp: str, customer: str, site: str) -> list:
+        """Return a list of (kind, name) tuples for objects that already
+        exist in EDAO-NMS for this MSP / Customer / Site combination.
+        Used by `_run_onboarding` to drive the override-confirm flow.
+        """
+        found = []
+        proxy_name  = f"Proxy{customer}{site}"
+        drule_name  = f"Proxy-{customer}-{site}"
+        action_name = f"Discovery{customer}-{site}"
+        site_group  = f"MSP/{msp}/{customer}/{site}"
+        if self.api.get_proxy_id(proxy_name):
+            found.append(("Proxy",            proxy_name))
+        if self.api.get_drule_id(drule_name):
+            found.append(("Discovery rule",   drule_name))
+        if self.api.get_action_id(action_name):
+            found.append(("Discovery action", action_name))
+        if self.api.get_hostgroup_id(site_group):
+            found.append(("Site host group",  site_group))
+        return found
+
     def _run_onboarding(self):
         if not self._connected or not self.api:
             messagebox.showwarning("Not connected", "Please connect first.")
@@ -1220,22 +1263,51 @@ class App(tk.Tk):
         else:
             template_ids = [self._templates[i]["templateid"] for i in sel_idx]
 
-        psk_line = f"  PSK         :  {'✔ will be applied' if psk_id and psk else '⚠ skipped (fields empty)'}\n"
-        if not messagebox.askyesno("Confirm Onboarding",
-            f"About to create:\n\n"
-            f"  Proxy       :  Proxy{customer}{site}  ({proxy_ip})\n"
-            f"  Group 1     :  MSP/{msp}/{customer}\n"
-            f"  Group 2     :  MSP/{msp}/{customer}/{site}\n"
-            f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
-            f"  Disc. action:  Discovery{customer}-{site}\n"
-            f"  Templates   :  {len(template_ids)} selected\n"
-            f"{psk_line}\nProceed?"):
+        # ── Collision check ───────────────────────────────────────────
+        # Re-onboarding the same MSP / Customer / Site must replace any
+        # existing entry, not silently skip the create steps. Detect any
+        # existing object up-front so the user confirms a delete-then-
+        # recreate explicitly.
+        try:
+            existing = self._find_existing_entries(msp, customer, site)
+        except Exception as e:
+            messagebox.showerror("Lookup failed",
+                f"Could not check for existing entries:\n{e}")
             return
+
+        override = bool(existing)
+        if override:
+            lines = "\n".join(f"  • {kind}: {name}" for kind, name in existing)
+            if not messagebox.askyesno("⚠️  Override existing entry?",
+                f"An entry for MSP={msp} / Customer={customer} / Site={site} "
+                f"already exists in EDAO-NMS:\n\n"
+                f"{lines}\n\n"
+                f"Proceeding will PERMANENTLY DELETE the items above plus all "
+                f"hosts assigned to proxy 'Proxy{customer}{site}', then "
+                f"re-create everything with the values from this form.\n\n"
+                f"Override?"):
+                return
+        else:
+            psk_line = f"  PSK         :  {'✔ will be applied' if psk_id and psk else '⚠ skipped (fields empty)'}\n"
+            if not messagebox.askyesno("Confirm Onboarding",
+                f"About to create:\n\n"
+                f"  Proxy       :  Proxy{customer}{site}  ({proxy_ip})\n"
+                f"  Group 1     :  MSP/{msp}/{customer}\n"
+                f"  Group 2     :  MSP/{msp}/{customer}/{site}\n"
+                f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
+                f"  Disc. action:  Discovery{customer}-{site}\n"
+                f"  Templates   :  {len(template_ids)} selected\n"
+                f"{psk_line}\nProceed?"):
+                return
 
         def _worker():
             try:
-                ob = Onboarder(self.api,
-                    lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv)))
+                log_cb = lambda m, lv="INFO": self.after(0, lambda: self._log(m, lv))
+                if override:
+                    self.after(0, lambda: self._log(
+                        "Override requested — removing existing entry first.", "WARN"))
+                    Remover(self.api, log_cb).remove_all(msp, customer, site)
+                ob = Onboarder(self.api, log_cb)
                 r = ob.run(
                     msp=msp,
                     customer=customer, site=site,
