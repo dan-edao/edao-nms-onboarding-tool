@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.8
+EDAO-NMS Onboarding Tool v2.9
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -383,11 +383,22 @@ class Remover:
             self._log(f"  Group '{g1_name}' not found — skipped.", "WARN")
             results["group1"] = None
 
-        # 5 — Proxy
+        # 5 — Proxy (unassign all hosts first, then delete)
         proxy_name = f"Proxy{customer}{site}"
         self._log(f"── Removing Proxy: {proxy_name}")
         pid = self.api.get_proxy_id(proxy_name)
         if pid:
+            # Find hosts still assigned to this proxy and unassign them
+            hosts = self.api.call("host.get",
+                                  proxyids=[pid], output=["hostid", "host"])
+            if hosts:
+                host_ids = [{"hostid": h["hostid"]} for h in hosts]
+                host_names = ", ".join(h["host"] for h in hosts)
+                self._log(f"  Unassigning {len(hosts)} host(s) from proxy: {host_names}", "WARN")
+                self.api.call("host.massupdate",
+                              hosts=host_ids,
+                              monitored_by=0)   # 0 = server (no proxy)
+                self._log(f"  Hosts unassigned from proxy.", "OK")
             self.api.call("proxy.delete", [pid])
             self._log(f"  Deleted proxy '{proxy_name}' (id={pid})", "OK")
             results["proxy"] = pid
@@ -414,7 +425,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.8")
+        self.title("EDAO-NMS Onboarding Tool  v2.9")
         self.resizable(True, True)
         self.minsize(900, 960)
 

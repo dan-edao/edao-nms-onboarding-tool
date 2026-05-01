@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.8  
+**Version:** 2.9  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,9 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.9 — 2026-04-30
+- Fix: Remove Site now unassigns all hosts from the proxy before deleting it (resolves "Host is monitored by proxy" error)
 
 ### v2.8 — 2026-04-30
 - New **🗑️ Remove Site** tab — permanently deletes all onboarding objects (Discovery Action, Discovery Rule, Host Groups, Proxy) for a given MSP/Customer/Site
