@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.9
+EDAO-NMS Onboarding Tool v2.10
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -383,22 +383,33 @@ class Remover:
             self._log(f"  Group '{g1_name}' not found — skipped.", "WARN")
             results["group1"] = None
 
-        # 5 — Proxy (unassign all hosts first, then delete)
+        # 5 — Delete all hosts in the site host group
+        g2_name = f"MSP/{msp}/{customer}/{site}"
+        gid2_for_hosts = self.api.get_hostgroup_id(g2_name)
+        if gid2_for_hosts:
+            site_hosts = self.api.call("host.get",
+                                       groupids=[gid2_for_hosts],
+                                       output=["hostid", "host"])
+        else:
+            site_hosts = []
+
+        if site_hosts:
+            host_ids = [h["hostid"] for h in site_hosts]
+            host_names = ", ".join(h["host"] for h in site_hosts)
+            self._log(f"── Deleting {len(site_hosts)} host(s) in site group")
+            self._log(f"  Hosts: {host_names}", "WARN")
+            self.api.call("host.delete", host_ids)
+            self._log(f"  Deleted {len(site_hosts)} host(s).", "OK")
+            results["hosts_deleted"] = len(site_hosts)
+        else:
+            self._log("── No hosts found in site group — skipped.", "WARN")
+            results["hosts_deleted"] = 0
+
+        # 6 — Proxy (hosts are already gone, safe to delete)
         proxy_name = f"Proxy{customer}{site}"
         self._log(f"── Removing Proxy: {proxy_name}")
         pid = self.api.get_proxy_id(proxy_name)
         if pid:
-            # Find hosts still assigned to this proxy and unassign them
-            hosts = self.api.call("host.get",
-                                  proxyids=[pid], output=["hostid", "host"])
-            if hosts:
-                host_ids = [{"hostid": h["hostid"]} for h in hosts]
-                host_names = ", ".join(h["host"] for h in hosts)
-                self._log(f"  Unassigning {len(hosts)} host(s) from proxy: {host_names}", "WARN")
-                self.api.call("host.massupdate",
-                              hosts=host_ids,
-                              monitored_by=0)   # 0 = server (no proxy)
-                self._log(f"  Hosts unassigned from proxy.", "OK")
             self.api.call("proxy.delete", [pid])
             self._log(f"  Deleted proxy '{proxy_name}' (id={pid})", "OK")
             results["proxy"] = pid
@@ -425,7 +436,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.9")
+        self.title("EDAO-NMS Onboarding Tool  v2.10")
         self.resizable(True, True)
         self.minsize(900, 960)
 
@@ -835,11 +846,12 @@ class App(tk.Tk):
         site     = self._rem_site_var.get().strip()
         if msp or customer or site:
             lines = [
-                f"Proxy          :  Proxy{customer}{site}",
-                f"Host Group 1   :  MSP/{msp}/{customer}  (only if empty)",
-                f"Host Group 2   :  MSP/{msp}/{customer}/{site}",
-                f"Discovery Rule :  Proxy-{customer}-{site}",
                 f"Discovery Act. :  Discovery{customer}-{site}",
+                f"Discovery Rule :  Proxy-{customer}-{site}",
+                f"Host Group     :  MSP/{msp}/{customer}/{site}",
+                f"Host Group     :  MSP/{msp}/{customer}  (only if empty)",
+                f"All Hosts      :  members of MSP/{msp}/{customer}/{site}",
+                f"Proxy          :  Proxy{customer}{site}",
             ]
             self._rem_preview_var.set("\n".join(lines))
         else:
@@ -866,11 +878,13 @@ class App(tk.Tk):
 
         if not messagebox.askyesno("⚠️  Confirm Removal",
             f"This will PERMANENTLY DELETE from EDAO-NMS:\n\n"
-            f"  Proxy          :  Proxy{customer}{site}\n"
+            f"  Discovery Act. :  Discovery{customer}-{site}\n"
+            f"  Discovery Rule :  Proxy-{customer}-{site}\n"
             f"  Host Group     :  MSP/{msp}/{customer}/{site}\n"
             f"  Host Group     :  MSP/{msp}/{customer}  (if empty)\n"
-            f"  Discovery Rule :  Proxy-{customer}-{site}\n"
-            f"  Discovery Act. :  Discovery{customer}-{site}\n\n"
+            f"  All Hosts      :  members of site group\n"
+            f"  Proxy          :  Proxy{customer}{site}\n\n"
+            f"⚠️  ALL HOSTS in the site group will be deleted.\n"
             f"This cannot be undone.\nAre you sure?",
             icon="warning"):
             return
