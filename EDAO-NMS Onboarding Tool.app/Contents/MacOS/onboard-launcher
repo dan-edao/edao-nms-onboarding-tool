@@ -1,0 +1,20 @@
+#!/bin/bash
+# EDAO-NMS Onboarding Tool .app — URL-scheme bridge.
+# macOS routes edaonms-proxy-onboard:// here; we just delegate to the
+# canonical launch_mac.command sitting alongside this .app bundle.
+
+# Resolve the directory containing the .app (3 levels up from MacOS/).
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+LAUNCHER="$APP_DIR/launch_mac.command"
+
+if [ ! -x "$LAUNCHER" ]; then
+    osascript -e "display alert \"EDAO-NMS Onboarding Tool\" message \"launch_mac.command was not found next to the app bundle.\n\nExpected: $LAUNCHER\n\nKeep the .app inside the edao-nms-onboarding-tool folder.\" as critical"
+    exit 1
+fi
+
+# Detach so the .app launcher process exits and macOS doesn't keep a
+# spinning dock icon. The launched Terminal/Tk window owns its own
+# lifecycle from this point on.
+"$LAUNCHER" >/dev/null 2>&1 &
+disown
+exit 0
