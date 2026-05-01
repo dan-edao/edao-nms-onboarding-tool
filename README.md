@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.6  
+**Version:** 2.7  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,9 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.7 — 2026-04-30
+- Fix: PSK configuration now uses correct TLS values for active proxies in Zabbix 7.x (tls_connect=1, tls_accept=2)
 
 ### v2.6 — 2026-04-30
 - Fix: SNMP discovery check OID now uses correct field name `key_` (not `snmp_oid`) per Zabbix 7.x dcheck API

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.6
+EDAO-NMS Onboarding Tool v2.7
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -250,9 +250,14 @@ class Onboarder:
     # ── Step 5: PSK encryption ────────────────────────────────────────────
 
     def configure_psk(self, proxy_id: str, psk_identity: str, psk: str):
+        # Active proxies: tls_connect must be 1 (proxy initiates outbound connection,
+        # server never connects inward).  tls_accept=2 = PSK authentication.
         self.api.call("proxy.update",
-            proxyid=proxy_id, tls_accept=4, tls_connect=4,
-            tls_psk_identity=psk_identity, tls_psk=psk)
+            proxyid=proxy_id,
+            tls_connect=1,                  # required fixed value for active proxies
+            tls_accept=2,                   # 2 = PSK
+            tls_psk_identity=psk_identity,
+            tls_psk=psk)
         self._log(f"PSK encryption configured on proxy id={proxy_id}")
 
     # ── Full onboarding run ───────────────────────────────────────────────
@@ -313,7 +318,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.6")
+        self.title("EDAO-NMS Onboarding Tool  v2.7")
         self.resizable(True, True)
         self.minsize(900, 960)
 
