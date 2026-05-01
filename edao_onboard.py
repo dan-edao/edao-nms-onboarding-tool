@@ -363,7 +363,13 @@ class Remover:
             self._log(f"  Discovery rule '{drule_name}' not found — skipped.", "WARN")
             results["drule"] = None
 
-        # 3 — Host Group (site-level)
+        # 3 — Host Group (site-level only)
+        # Removing a site must NOT touch the customer-level host group
+        # (MSP/<msp>/<customer>) because sibling sites' Discovery Actions
+        # still reference it — Zabbix correctly refuses with "action
+        # '<DiscoveryX>' uses this host group" and the whole removal
+        # aborts mid-flight. Customer-group cleanup is a separate concern;
+        # it should happen when the customer record itself is removed.
         g2_name = f"MSP/{msp}/{customer}/{site}"
         self._log(f"── Removing Host Group: {g2_name}")
         gid2 = self.api.get_hostgroup_id(g2_name)
@@ -375,24 +381,7 @@ class Remover:
             self._log(f"  Group '{g2_name}' not found — skipped.", "WARN")
             results["group2"] = None
 
-        # 4 — Host Group (customer-level) — only if empty
-        g1_name = f"MSP/{msp}/{customer}"
-        self._log(f"── Removing Host Group: {g1_name}")
-        gid1 = self.api.get_hostgroup_id(g1_name)
-        if gid1:
-            hosts = self.api.call("host.get", groupids=[gid1], output=["hostid"])
-            if hosts:
-                self._log(f"  Group '{g1_name}' still has {len(hosts)} host(s) — skipped.", "WARN")
-                results["group1"] = None
-            else:
-                self.api.call("hostgroup.delete", [gid1])
-                self._log(f"  Deleted group '{g1_name}' (id={gid1})", "OK")
-                results["group1"] = gid1
-        else:
-            self._log(f"  Group '{g1_name}' not found — skipped.", "WARN")
-            results["group1"] = None
-
-        # 5 — Delete all hosts assigned to the proxy (looked up by proxy ID, not group)
+        # 4 — Delete all hosts assigned to the proxy (looked up by proxy ID, not group)
         proxy_name = f"Proxy{customer}{site}"
         pid = self.api.get_proxy_id(proxy_name)
 
@@ -415,7 +404,7 @@ class Remover:
             self._log("  No hosts assigned to this proxy — skipped.", "WARN")
             results["hosts_deleted"] = 0
 
-        # 6 — Proxy (all hosts deleted, safe to remove)
+        # 5 — Proxy (all hosts deleted, safe to remove)
         self._log(f"── Removing Proxy: {proxy_name}")
         if pid:
             self.api.call("proxy.delete", [pid])
