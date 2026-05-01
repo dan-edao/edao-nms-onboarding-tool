@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.10
+EDAO-NMS Onboarding Tool v2.11
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -383,32 +383,31 @@ class Remover:
             self._log(f"  Group '{g1_name}' not found — skipped.", "WARN")
             results["group1"] = None
 
-        # 5 — Delete all hosts in the site host group
-        g2_name = f"MSP/{msp}/{customer}/{site}"
-        gid2_for_hosts = self.api.get_hostgroup_id(g2_name)
-        if gid2_for_hosts:
-            site_hosts = self.api.call("host.get",
-                                       groupids=[gid2_for_hosts],
-                                       output=["hostid", "host"])
-        else:
-            site_hosts = []
+        # 5 — Delete all hosts assigned to the proxy (looked up by proxy ID, not group)
+        proxy_name = f"Proxy{customer}{site}"
+        pid = self.api.get_proxy_id(proxy_name)
 
-        if site_hosts:
-            host_ids = [h["hostid"] for h in site_hosts]
-            host_names = ", ".join(h["host"] for h in site_hosts)
-            self._log(f"── Deleting {len(site_hosts)} host(s) in site group")
+        if pid:
+            proxy_hosts = self.api.call("host.get",
+                                        proxyids=[pid],
+                                        output=["hostid", "host"])
+        else:
+            proxy_hosts = []
+
+        self._log(f"── Deleting hosts for proxy: {proxy_name}")
+        if proxy_hosts:
+            host_ids   = [h["hostid"] for h in proxy_hosts]
+            host_names = ", ".join(h["host"] for h in proxy_hosts)
             self._log(f"  Hosts: {host_names}", "WARN")
             self.api.call("host.delete", host_ids)
-            self._log(f"  Deleted {len(site_hosts)} host(s).", "OK")
-            results["hosts_deleted"] = len(site_hosts)
+            self._log(f"  Deleted {len(proxy_hosts)} host(s).", "OK")
+            results["hosts_deleted"] = len(proxy_hosts)
         else:
-            self._log("── No hosts found in site group — skipped.", "WARN")
+            self._log("  No hosts assigned to this proxy — skipped.", "WARN")
             results["hosts_deleted"] = 0
 
-        # 6 — Proxy (hosts are already gone, safe to delete)
-        proxy_name = f"Proxy{customer}{site}"
+        # 6 — Proxy (all hosts deleted, safe to remove)
         self._log(f"── Removing Proxy: {proxy_name}")
-        pid = self.api.get_proxy_id(proxy_name)
         if pid:
             self.api.call("proxy.delete", [pid])
             self._log(f"  Deleted proxy '{proxy_name}' (id={pid})", "OK")
@@ -436,7 +435,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.10")
+        self.title("EDAO-NMS Onboarding Tool  v2.11")
         self.resizable(True, True)
         self.minsize(900, 960)
 
