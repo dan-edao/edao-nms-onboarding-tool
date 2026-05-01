@@ -12,9 +12,9 @@ if [ ! -x "$LAUNCHER" ]; then
     exit 1
 fi
 
-# Detach so the .app launcher process exits and macOS doesn't keep a
-# spinning dock icon. The launched Terminal/Tk window owns its own
-# lifecycle from this point on.
-"$LAUNCHER" >/dev/null 2>&1 &
-disown
-exit 0
+# Replace the .app's process with the launcher (which itself execs
+# python3). This keeps the .app's PID alive for the lifetime of the
+# Tk window — if we backgrounded + exited here, macOS would reap the
+# child process group when the .app exited and the tool would never
+# get a chance to draw its window (silent failure with no output).
+exec "$LAUNCHER"

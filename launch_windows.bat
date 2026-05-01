@@ -1,5 +1,5 @@
 @echo off
-REM EDAO-NMS Onboarding Tool v2.12 — Windows launcher
+REM EDAO-NMS Onboarding Tool v2.13 — Windows launcher
 REM Double-click this file to start the tool.
 
 where python >nul 2>nul
