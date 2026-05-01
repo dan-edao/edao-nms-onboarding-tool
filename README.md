@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.4  
+**Version:** 2.5  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,10 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.5 — 2026-04-30
+- Fix: SNMP discovery check now includes required `snmp_oid` (sysDescr 1.3.6.1.2.1.1.1.0)
+- Fix: NameError crash in error handler lambda (Python 3 exception variable scope)
 
 ### v2.4 — 2026-04-30
 - Fix proxy creation error on Zabbix 7.x: active proxies now use address="127.0.0.1" (required by API); public IP stored in proxy description

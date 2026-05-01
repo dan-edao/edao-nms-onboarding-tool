@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.4
+EDAO-NMS Onboarding Tool v2.5
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -160,9 +160,10 @@ class Onboarder:
         if use_icmp:
             dchecks.append({"type": "12"})                    # ICMP ping
         if use_snmp:
-            dchecks.append({                                   # SNMPv1  (matches live convention)
+            dchecks.append({                                   # SNMPv1
                 "type": "10",
                 "snmp_community": snmp_community or "public",
+                "snmp_oid": "1.3.6.1.2.1.1.1.0",             # sysDescr — standard OID required by API
                 "ports": "161",
             })
         if use_agent:
@@ -312,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.4")
+        self.title("EDAO-NMS Onboarding Tool  v2.5")
         self.resizable(True, True)
         self.minsize(900, 960)
 
@@ -763,8 +764,8 @@ class App(tk.Tk):
                 self.after(0, lambda: self._log(
                     f"Loaded {len(t)} templates.", "OK"))
             except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Failed to fetch templates: {e}", "ERR"))
+                err = str(e)
+                self.after(0, lambda m=err: self._log(f"Failed to fetch templates: {m}", "ERR"))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -913,10 +914,9 @@ class App(tk.Tk):
                     f"PSK Encryption  : {psk_status}\n",
                 ))
             except Exception as e:
-                self.after(0, lambda: self._log(
-                    f"Onboarding failed: {e}", "ERR"))
-                self.after(0, lambda: messagebox.showerror(
-                    "Onboarding failed", str(e)))
+                err = str(e)
+                self.after(0, lambda m=err: self._log(f"Onboarding failed: {m}", "ERR"))
+                self.after(0, lambda m=err: messagebox.showerror("Onboarding failed", m))
 
         threading.Thread(target=_worker, daemon=True).start()
 
