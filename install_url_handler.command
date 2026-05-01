@@ -24,6 +24,16 @@ if [ ! -x "$LSREG" ]; then
     exit 1
 fi
 
+# Repair the bundle's code signature before registering. Editing
+# Info.plist (e.g. bumping CFBundleVersion) or anything inside the
+# .app invalidates the ad-hoc seal osacompile applied — once the seal
+# is broken, macOS Gatekeeper refuses to launch the bundle and the
+# URL scheme silently fails. Stripping xattrs + an ad-hoc re-sign
+# restores it. Safe to run on an already-valid bundle (codesign
+# --force is idempotent).
+xattr -cr "$APP_PATH"
+codesign --force --deep --sign - "$APP_PATH"
+
 # Force-register the bundle. -f forces re-registration even if the path
 # was previously known. -R recurses (cheap here, single bundle).
 "$LSREG" -f -R "$APP_PATH"

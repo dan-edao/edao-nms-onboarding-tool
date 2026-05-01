@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.14
+NMS Proxy Onboarding Tool v2.15
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -444,9 +444,21 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.14")
-        self.resizable(True, True)
-        self.minsize(900, 960)
+        self.title("NMS Proxy Onboarding Tool  v2.15")
+
+        # Fixed size — window cannot be resized.
+        win_w, win_h = 900, 760
+        self.resizable(False, False)
+
+        # Center on the primary screen and lock that position so the
+        # window cannot be dragged to a new location.
+        self.update_idletasks()
+        scr_w = self.winfo_screenwidth()
+        scr_h = self.winfo_screenheight()
+        self._fixed_x = max(0, (scr_w - win_w) // 2)
+        self._fixed_y = max(0, (scr_h - win_h) // 3)
+        self.geometry(f"{win_w}x{win_h}+{self._fixed_x}+{self._fixed_y}")
+        self.bind("<Configure>", self._lock_position)
 
         self.api: Optional[ZabbixAPI]  = None
         self._connected                = False
@@ -457,6 +469,13 @@ class App(tk.Tk):
         self._build_ui()
         self._load_config()
         self._load_prefill_from_downloads()
+
+    def _lock_position(self, event):
+        # Snap the window back if the OS or the user moves it.
+        if event.widget is not self:
+            return
+        if (self.winfo_x(), self.winfo_y()) != (self._fixed_x, self._fixed_y):
+            self.geometry(f"+{self._fixed_x}+{self._fixed_y}")
 
     # ── Config ────────────────────────────────────────────────────────────
 
@@ -543,20 +562,32 @@ class App(tk.Tk):
     def _build_ui(self):
         banner = tk.Frame(self, bg="#003366")
         banner.pack(fill=X)
-        # Status label — right side (pack first so it gets priority)
+
+        # EDAO logo on the top-left. Held as an attribute so PhotoImage
+        # is not garbage collected.
+        try:
+            full = tk.PhotoImage(data=LOGO_B64)
+            # Source PNG is 140x140 — subsample(2) gives 70x70, a good
+            # banner size.
+            self._logo_img = full.subsample(2, 2)
+        except Exception:
+            self._logo_img = None
+        if self._logo_img is not None:
+            tk.Label(banner, image=self._logo_img, bg="#003366",
+                     bd=0).pack(side=LEFT, padx=12, pady=8)
+
+        # Status label — right side
         self._status_lbl = tk.Label(banner, text="● Not connected",
                                     bg="#003366", fg="#FF6B6B",
                                     font=("Helvetica", 13))
         self._status_lbl.pack(side=RIGHT, padx=16)
-        # Centered 2-line title
+
+        # Centered title
         center = tk.Frame(banner, bg="#003366")
         center.pack(expand=True, pady=10)
-        tk.Label(center, text="EDAO",
+        tk.Label(center, text="NMS Proxy Onboarding Tool",
                  bg="#003366", fg="white",
-                 font=("Helvetica", 28, "bold")).pack()
-        tk.Label(center, text="NMS Onboarding Tool",
-                 bg="#003366", fg="#aaccff",
-                 font=("Helvetica", 15)).pack()
+                 font=("Helvetica", 22, "bold")).pack()
 
         self._nb = ttk.Notebook(self)
         self._nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
