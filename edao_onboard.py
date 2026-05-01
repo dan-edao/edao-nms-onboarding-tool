@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.5
+EDAO-NMS Onboarding Tool v2.6
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -162,8 +162,8 @@ class Onboarder:
         if use_snmp:
             dchecks.append({                                   # SNMPv1
                 "type": "10",
+                "key_": "1.3.6.1.2.1.1.1.0",                 # sysDescr OID — field name is key_ for dchecks
                 "snmp_community": snmp_community or "public",
-                "snmp_oid": "1.3.6.1.2.1.1.1.0",             # sysDescr — standard OID required by API
                 "ports": "161",
             })
         if use_agent:
@@ -313,7 +313,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.5")
+        self.title("EDAO-NMS Onboarding Tool  v2.6")
         self.resizable(True, True)
         self.minsize(900, 960)
 

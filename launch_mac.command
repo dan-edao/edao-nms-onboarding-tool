@@ -1,5 +1,5 @@
 #!/bin/bash
-# EDAO-NMS Onboarding Tool v2.5 — macOS launcher
+# EDAO-NMS Onboarding Tool v2.6 — macOS launcher
 # Double-click this file to start the tool.
 # First time: right-click → Open (to bypass Gatekeeper).
 
