@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.3
+EDAO-NMS Onboarding Tool v2.4
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -127,9 +127,11 @@ class Onboarder:
             self._log(f"Proxy '{name}' already exists (id={existing}), skipping.", "WARN")
             return existing
         result = self.api.call("proxy.create",
-            name=name, operating_mode=0, address=ip, port="10051")
+            name=name, operating_mode=0,
+            address="127.0.0.1", port="10051",
+            description=f"Public IP: {ip}")
         pid = result["proxyids"][0]
-        self._log(f"Created proxy '{name}'  (id={pid}, ip={ip})")
+        self._log(f"Created proxy '{name}'  (id={pid}, public_ip={ip})")
         return pid
 
     # ── Step 2: Host groups ───────────────────────────────────────────────
@@ -310,7 +312,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.3")
+        self.title("EDAO-NMS Onboarding Tool  v2.4")
         self.resizable(True, True)
         self.minsize(900, 960)
 
