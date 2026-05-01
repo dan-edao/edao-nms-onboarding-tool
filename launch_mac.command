@@ -1,11 +1,40 @@
 #!/bin/bash
-# EDAO-NMS Onboarding Tool v2.14 — macOS launcher
+# EDAO-NMS Onboarding Tool — macOS launcher (self-healing).
 # Double-click this file to start the tool.
 # First time: right-click → Open (to bypass Gatekeeper).
+#
+# Tool version label is in edao_onboard.py — this script intentionally
+# does NOT carry a version number so it doesn't drift on every release.
 
 cd "$(dirname "$0")"
 
 export TK_SILENCE_DEPRECATION=1
+
+# ── Self-heal the .app sibling ────────────────────────────────────────
+# macOS Launch Services refuses to open a bundle whose ad-hoc seal has
+# been invalidated (e.g. someone bumped CFBundleVersion in Info.plist
+# or modified main.scpt). When that happens, the Control Hub's Deploy
+# Now! → edaonms-proxy-onboard:// handoff silently fails — the URL
+# fires but no window appears.
+#
+# This launcher always runs in-process (not via Launch Services), so
+# we can be sure it executes regardless of the .app's seal state. We
+# verify the seal here and re-sign + re-register if it's broken, so
+# whenever the operator falls back to double-clicking this script
+# directly, the bundle is repaired in passing and the next URL launch
+# from the Control Hub works again.
+#
+# No-ops on a healthy bundle (codesign --verify exit 0).
+APP_BUNDLE="$(pwd)/EDAO-NMS Onboarding Tool.app"
+if [ -d "$APP_BUNDLE" ]; then
+    if ! /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE" >/dev/null 2>&1; then
+        echo "[launcher] .app bundle seal broken — auto-repairing"
+        /usr/bin/xattr -cr "$APP_BUNDLE" 2>/dev/null
+        /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+            -f -R "$APP_BUNDLE" >/dev/null 2>&1
+    fi
+fi
 
 # Pick a Python that has a working Tk (>= 8.6).
 # Apple's stock /usr/bin/python3 ships Tk 8.5, which renders blank windows

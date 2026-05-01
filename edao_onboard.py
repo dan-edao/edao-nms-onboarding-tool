@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.16
+NMS Proxy Onboarding Tool v2.19
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -444,7 +444,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.16")
+        self.title("NMS Proxy Onboarding Tool  v2.19")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
@@ -567,13 +567,25 @@ class App(tk.Tk):
                 filled.append("apiToken")
             if filled:
                 self._log(f"Loaded {len(filled)} field(s) from {os.path.basename(path)}: {', '.join(filled)}", "OK")
-                # Switch the user straight to the Onboarding tab so they
-                # see the pre-filled fields instead of staring at the
-                # Connection tab.
-                try:
-                    self._nb.select(self._tab_onboard)
-                except Exception:
-                    pass
+                # Auto-pilot for the Control Hub Deploy Now! handoff:
+                # if the payload included a token, drive the operator
+                # all the way through Test & Connect → Onboarding tab →
+                # Fetch templates without any manual clicks. We stay on
+                # the Connection tab visually while the connect runs so
+                # the user sees the live status flip to ● Connected.
+                # _set_connected fires _auto_pilot_post_connect once
+                # the connection succeeds. If no token came down, fall
+                # back to the previous behaviour (jump straight to the
+                # Onboarding tab so the prefilled fields are visible).
+                if api_token:
+                    self._auto_pilot_after_connect = True
+                    self._log("Auto-pilot armed: will Test & Connect, then Fetch Available Templates.", "INFO")
+                    self.after(500, self._do_connect)
+                else:
+                    try:
+                        self._nb.select(self._tab_onboard)
+                    except Exception:
+                        pass
         except Exception as e:
             try:
                 self._log(f"Prefill scan failed: {e}", "WARN")
@@ -754,8 +766,28 @@ class App(tk.Tk):
         inner.bind("<Configure>", lambda e: canvas.configure(
             scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(win, width=e.width))
-        canvas.bind_all("<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        # Trackpad / mouse-wheel scrolling. Tk reports event.delta in
+        # platform-specific units:
+        #   • aqua  (macOS): small ints, often ±1 — divide-by-120 yields 0
+        #   • win32 (Windows): multiples of ±120
+        #   • x11   (Linux): no MouseWheel event at all — Button-4 / Button-5
+        windowing = self.tk.call("tk", "windowingsystem")
+        def _on_mousewheel(e):
+            # Don't hijack the wheel when the cursor is over a widget
+            # that scrolls itself (templates listbox, activity log).
+            w = e.widget
+            if isinstance(w, (tk.Listbox, tk.Text)):
+                return
+            if windowing == "aqua":
+                step = -int(e.delta) or (-1 if e.delta < 0 else 1)
+            else:
+                step = int(-e.delta / 120)
+            canvas.yview_scroll(step, "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Linux/X11 emits Button-4 / Button-5 instead of MouseWheel.
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll( 1, "units"))
 
         row = 0
 
@@ -891,6 +923,21 @@ class App(tk.Tk):
         self._tmpl_list.configure(yscrollcommand=tsb.set)
         self._tmpl_list.pack(side=LEFT, fill=BOTH, expand=True)
         tsb.pack(side=LEFT, fill=Y)
+
+        # macOS: Tk's Listbox uses Control for toggle-select but the
+        # platform convention is Cmd. Bind Cmd-click to mirror Ctrl-click.
+        def _toggle_click(event):
+            idx = self._tmpl_list.nearest(event.y)
+            if idx < 0:
+                return "break"
+            if idx in self._tmpl_list.curselection():
+                self._tmpl_list.selection_clear(idx)
+            else:
+                self._tmpl_list.selection_set(idx)
+            self._tmpl_list.activate(idx)
+            return "break"
+        self._tmpl_list.bind("<Command-Button-1>", _toggle_click)
+        self._tmpl_list.bind("<Command-B1-Motion>", lambda e: "break")
         tk.Label(inner,
                  text="💡  Hold Ctrl (Windows) or ⌘ Cmd (Mac) and click to select multiple templates",
                  font=FONT_SMALL, fg="#555").grid(
@@ -1046,9 +1093,29 @@ class App(tk.Tk):
         if connected:
             self._status_lbl.configure(text="● Connected", fg="#4ec9b0")
             self._api_info_lbl.configure(text=info)
+            # One-shot auto-pilot hook armed by _load_prefill_from_downloads
+            # when the Control Hub payload included an apiToken. Cleared
+            # before firing so a manual reconnect later in the session
+            # doesn't re-trigger.
+            if getattr(self, "_auto_pilot_after_connect", False):
+                self._auto_pilot_after_connect = False
+                self.after(300, self._auto_pilot_post_connect)
         else:
             self._status_lbl.configure(text="● Not connected", fg="#FF6B6B")
             self._api_info_lbl.configure(text="Not connected.")
+
+    def _auto_pilot_post_connect(self):
+        """Auto-advance to the Onboarding tab and fetch templates after a
+        successful connection initiated by the URL-handoff prefill flow."""
+        try:
+            self._nb.select(self._tab_onboard)
+        except Exception:
+            pass
+        self._log("Auto-pilot: switching to Onboarding tab + fetching templates.", "INFO")
+        try:
+            self._fetch_templates()
+        except Exception as e:
+            self._log(f"Auto-pilot fetch_templates failed: {e}", "WARN")
 
     def _update_preview(self):
         msp  = self._msp_var.get().strip()
@@ -1188,18 +1255,30 @@ class App(tk.Tk):
     def _apply_tmpl_filter(self):
         keyword = self._tmpl_filter_var.get().lower()
         self._tmpl_list.delete(0, END)
-        default_name = "EDAO-ICMP Ping"
+        # Templates pre-selected by default. Both spaced ("EDAO - X") and
+        # un-spaced ("EDAO-X") naming variants are accepted so the
+        # auto-select keeps working if the customer renames templates.
+        defaults = {
+            "edao - icmp ping",
+            "edao-icmp ping",
+            "edao - generic by snmp",
+            "edao-generic by snmp",
+        }
         # Build a filtered view; track original indices for selection lookup
         self._filtered_template_indices = []
+        first_default_pos = None
         for i, t in enumerate(self._templates):
             if keyword and keyword not in t["name"].lower():
                 continue
             self._tmpl_list.insert(END, t["name"])
             self._filtered_template_indices.append(i)
-            if t["name"] == default_name:
+            if t["name"].strip().lower() in defaults:
                 pos = len(self._filtered_template_indices) - 1
                 self._tmpl_list.selection_set(pos)
-                self._tmpl_list.see(pos)
+                if first_default_pos is None:
+                    first_default_pos = pos
+        if first_default_pos is not None:
+            self._tmpl_list.see(first_default_pos)
 
     def _find_existing_entries(self, msp: str, customer: str, site: str) -> list:
         """Return a list of (kind, name) tuples for objects that already
@@ -1321,15 +1400,23 @@ class App(tk.Tk):
                 )
                 self._onboard_results = r
                 psk_status = "✔ Applied" if r.get("psk_applied") else "⚠ Skipped (fields empty)"
-                self.after(0, lambda: messagebox.showinfo(
-                    "Onboarding Complete",
+                summary = (
                     f"All steps completed!\n\n"
                     f"Proxy ID        : {r['proxy_id']}\n"
                     f"Group IDs       : {r['gid1']}, {r['gid2']}\n"
                     f"Discovery Rule  : {r['drule_id']}\n"
                     f"Discovery Action: {r['action_id']}\n"
-                    f"PSK Encryption  : {psk_status}\n",
-                ))
+                    f"PSK Encryption  : {psk_status}\n"
+                )
+                # Show the success dialog, then quit the app once the
+                # user dismisses it. messagebox.showinfo blocks the main
+                # thread until OK is clicked, so destroy() runs right
+                # after. Only the success path quits — failures leave
+                # the window open so the operator can read the log.
+                def _finish():
+                    messagebox.showinfo("Onboarding Complete", summary)
+                    self.destroy()
+                self.after(0, _finish)
             except Exception as e:
                 err = str(e)
                 self.after(0, lambda m=err: self._log(f"Onboarding failed: {m}", "ERR"))

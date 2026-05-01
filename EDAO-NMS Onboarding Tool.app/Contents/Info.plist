@@ -20,10 +20,22 @@
 	<string>EDAO-NMS Onboarding Tool</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.edaogroup.nms.onboarding</string>
+	<!-- ────────────────────────────────────────────────────────────────
+	     DO NOT BUMP CFBundleVersion / CFBundleShortVersionString.
+	     The tool version is the title-bar label in edao_onboard.py.
+	     This bundle is just a URL-scheme bridge; its version is pinned
+	     so editing it never invalidates the ad-hoc seal that Launch
+	     Services checks before opening the .app for an
+	     edaonms-proxy-onboard:// URL. (When the seal breaks, macOS
+	     refuses to launch the bundle and the URL handoff silently
+	     fails — the symptom is "platform cannot launch the tool".)
+	     If you need to bump for some macOS reason, run
+	     install_url_handler.command afterwards to re-sign + re-register.
+	     ──────────────────────────────────────────────────────────────── -->
 	<key>CFBundleVersion</key>
-	<string>2.16</string>
+	<string>1</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.16</string>
+	<string>1</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleURLTypes</key>
