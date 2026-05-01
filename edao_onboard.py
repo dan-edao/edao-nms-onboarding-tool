@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDAO-NMS Onboarding Tool v2.7
+EDAO-NMS Onboarding Tool v2.8
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -103,6 +103,14 @@ class ZabbixAPI:
     def get_drule_id(self, name: str) -> Optional[str]:
         r = self.call("drule.get", filter={"name": [name]}, output=["druleid"])
         return r[0]["druleid"] if r else None
+
+    def get_hostgroup_id(self, name: str) -> Optional[str]:
+        r = self.call("hostgroup.get", filter={"name": [name]}, output=["groupid"])
+        return r[0]["groupid"] if r else None
+
+    def get_action_id(self, name: str) -> Optional[str]:
+        r = self.call("action.get", filter={"name": [name]}, output=["actionid"])
+        return r[0]["actionid"] if r else None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,6 +313,94 @@ class Onboarder:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Removal logic
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Remover:
+    def __init__(self, api: ZabbixAPI, log):
+        self.api = api
+        self.log = log
+
+    def _log(self, msg: str, level: str = "INFO"):
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log(f"[{ts}] [{level}] {msg}", level)
+
+    def remove_all(self, msp: str, customer: str, site: str) -> dict:
+        results = {}
+        self._log("═" * 52)
+        self._log(f"Removing  MSP={msp}  Customer={customer}  Site={site}")
+
+        # 1 — Discovery Action
+        action_name = f"Discovery{customer}-{site}"
+        self._log(f"── Removing Discovery Action: {action_name}")
+        aid = self.api.get_action_id(action_name)
+        if aid:
+            self.api.call("action.delete", [aid])
+            self._log(f"  Deleted action '{action_name}' (id={aid})", "OK")
+            results["action"] = aid
+        else:
+            self._log(f"  Action '{action_name}' not found — skipped.", "WARN")
+            results["action"] = None
+
+        # 2 — Discovery Rule
+        drule_name = f"Proxy-{customer}-{site}"
+        self._log(f"── Removing Discovery Rule: {drule_name}")
+        did = self.api.get_drule_id(drule_name)
+        if did:
+            self.api.call("drule.delete", [did])
+            self._log(f"  Deleted discovery rule '{drule_name}' (id={did})", "OK")
+            results["drule"] = did
+        else:
+            self._log(f"  Discovery rule '{drule_name}' not found — skipped.", "WARN")
+            results["drule"] = None
+
+        # 3 — Host Group (site-level)
+        g2_name = f"MSP/{msp}/{customer}/{site}"
+        self._log(f"── Removing Host Group: {g2_name}")
+        gid2 = self.api.get_hostgroup_id(g2_name)
+        if gid2:
+            self.api.call("hostgroup.delete", [gid2])
+            self._log(f"  Deleted group '{g2_name}' (id={gid2})", "OK")
+            results["group2"] = gid2
+        else:
+            self._log(f"  Group '{g2_name}' not found — skipped.", "WARN")
+            results["group2"] = None
+
+        # 4 — Host Group (customer-level) — only if empty
+        g1_name = f"MSP/{msp}/{customer}"
+        self._log(f"── Removing Host Group: {g1_name}")
+        gid1 = self.api.get_hostgroup_id(g1_name)
+        if gid1:
+            hosts = self.api.call("host.get", groupids=[gid1], output=["hostid"])
+            if hosts:
+                self._log(f"  Group '{g1_name}' still has {len(hosts)} host(s) — skipped.", "WARN")
+                results["group1"] = None
+            else:
+                self.api.call("hostgroup.delete", [gid1])
+                self._log(f"  Deleted group '{g1_name}' (id={gid1})", "OK")
+                results["group1"] = gid1
+        else:
+            self._log(f"  Group '{g1_name}' not found — skipped.", "WARN")
+            results["group1"] = None
+
+        # 5 — Proxy
+        proxy_name = f"Proxy{customer}{site}"
+        self._log(f"── Removing Proxy: {proxy_name}")
+        pid = self.api.get_proxy_id(proxy_name)
+        if pid:
+            self.api.call("proxy.delete", [pid])
+            self._log(f"  Deleted proxy '{proxy_name}' (id={pid})", "OK")
+            results["proxy"] = pid
+        else:
+            self._log(f"  Proxy '{proxy_name}' not found — skipped.", "WARN")
+            results["proxy"] = None
+
+        self._log("═" * 52)
+        self._log("Removal complete!", "OK")
+        return results
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GUI
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -318,7 +414,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EDAO-NMS Onboarding Tool  v2.7")
+        self.title("EDAO-NMS Onboarding Tool  v2.8")
         self.resizable(True, True)
         self.minsize(900, 960)
 
@@ -381,12 +477,15 @@ class App(tk.Tk):
 
         self._tab_connect = ttk.Frame(self._nb)
         self._tab_onboard = ttk.Frame(self._nb)
+        self._tab_remove  = ttk.Frame(self._nb)
 
         self._nb.add(self._tab_connect, text="  🔌 Connection  ")
         self._nb.add(self._tab_onboard, text="  🏢 Onboarding  ")
+        self._nb.add(self._tab_remove,  text="  🗑️ Remove Site  ")
 
         self._build_connect_tab()
         self._build_onboard_tab()
+        self._build_remove_tab()
 
         ttk.Separator(self, orient="horizontal").pack(fill=X, padx=8)
         log_frame = ttk.LabelFrame(self, text="  Activity Log", padding=4)
@@ -663,6 +762,127 @@ class App(tk.Tk):
             row=row, column=0, columnspan=3, pady=20)
         row += 1
         inner.columnconfigure(1, weight=1)
+
+    # ── Remove Site tab ───────────────────────────────────────────────────
+
+    def _build_remove_tab(self):
+        f = self._tab_remove
+
+        # Warning banner
+        warn = tk.Frame(f, bg="#5c1010", bd=1, relief="solid")
+        warn.pack(fill=X, padx=16, pady=(16, 8))
+        tk.Label(warn,
+                 text="⚠️  Permanently removes all onboarding objects from EDAO-NMS",
+                 font=FONT_HEAD, bg="#5c1010", fg="#ffcccc").pack(pady=8)
+
+        form = tk.Frame(f)
+        form.pack(padx=24, pady=4, fill=X)
+
+        def row_field(label, var, hint=""):
+            r = form.grid_size()[1]
+            tk.Label(form, text=label, font=FONT_LABEL, anchor=E).grid(
+                row=r, column=0, sticky=E, padx=(0, 8), pady=4)
+            ttk.Entry(form, textvariable=var, font=FONT_ENTRY, width=30).grid(
+                row=r, column=1, sticky=W, pady=4)
+            if hint:
+                tk.Label(form, text=hint, font=FONT_SMALL, fg="#888").grid(
+                    row=r, column=2, sticky=W, padx=6)
+
+        self._rem_msp_var      = StringVar()
+        self._rem_customer_var = StringVar()
+        self._rem_site_var     = StringVar()
+
+        row_field("MSP Name:",      self._rem_msp_var,      "e.g.  EDAO")
+        row_field("Customer Name:", self._rem_customer_var,  "e.g.  Acme")
+        row_field("Site Name:",     self._rem_site_var,      "e.g.  NYC")
+        form.columnconfigure(1, weight=1)
+
+        # Live preview of what will be deleted
+        prev_frame = ttk.LabelFrame(f, text="  Objects that will be deleted", padding=8)
+        prev_frame.pack(fill=X, padx=24, pady=(8, 4))
+        self._rem_preview_var = StringVar(value="— fill in the fields above —")
+        tk.Label(prev_frame, textvariable=self._rem_preview_var,
+                 font=("Courier", 12), fg="#f44747",
+                 justify=LEFT, anchor=W).pack(fill=X)
+
+        for v in (self._rem_msp_var, self._rem_customer_var, self._rem_site_var):
+            v.trace_add("write", lambda *_: self._update_remove_preview())
+
+        # Copy from Onboarding tab button
+        ttk.Button(f, text="📋  Copy fields from Onboarding tab",
+                   command=self._copy_onboard_to_remove).pack(pady=(4, 8))
+
+        ttk.Separator(f, orient="horizontal").pack(fill=X, padx=16, pady=4)
+
+        ttk.Button(f, text="🗑️  Remove All Objects",
+                   command=self._run_remove,
+                   style="Accent.TButton").pack(pady=12)
+
+    def _update_remove_preview(self):
+        msp      = self._rem_msp_var.get().strip()
+        customer = self._rem_customer_var.get().strip()
+        site     = self._rem_site_var.get().strip()
+        if msp or customer or site:
+            lines = [
+                f"Proxy          :  Proxy{customer}{site}",
+                f"Host Group 1   :  MSP/{msp}/{customer}  (only if empty)",
+                f"Host Group 2   :  MSP/{msp}/{customer}/{site}",
+                f"Discovery Rule :  Proxy-{customer}-{site}",
+                f"Discovery Act. :  Discovery{customer}-{site}",
+            ]
+            self._rem_preview_var.set("\n".join(lines))
+        else:
+            self._rem_preview_var.set("— fill in the fields above —")
+
+    def _copy_onboard_to_remove(self):
+        self._rem_msp_var.set(self._msp_var.get())
+        self._rem_customer_var.set(self._customer_var.get())
+        self._rem_site_var.set(self._site_var.get())
+
+    def _run_remove(self):
+        if not self._connected or not self.api:
+            messagebox.showwarning("Not connected", "Please connect first.")
+            return
+
+        msp      = self._rem_msp_var.get().strip()
+        customer = self._rem_customer_var.get().strip()
+        site     = self._rem_site_var.get().strip()
+
+        if not msp or not customer or not site:
+            messagebox.showwarning("Missing fields",
+                "Please fill in MSP Name, Customer Name and Site Name.")
+            return
+
+        if not messagebox.askyesno("⚠️  Confirm Removal",
+            f"This will PERMANENTLY DELETE from EDAO-NMS:\n\n"
+            f"  Proxy          :  Proxy{customer}{site}\n"
+            f"  Host Group     :  MSP/{msp}/{customer}/{site}\n"
+            f"  Host Group     :  MSP/{msp}/{customer}  (if empty)\n"
+            f"  Discovery Rule :  Proxy-{customer}-{site}\n"
+            f"  Discovery Act. :  Discovery{customer}-{site}\n\n"
+            f"This cannot be undone.\nAre you sure?",
+            icon="warning"):
+            return
+
+        def _worker():
+            try:
+                rem = Remover(self.api,
+                    lambda m, lv="INFO": self.after(0, lambda msg=m, level=lv: self._log(msg, level)))
+                r = rem.remove_all(msp, customer, site)
+                deleted = [k for k, v in r.items() if v]
+                skipped = [k for k, v in r.items() if not v]
+                self.after(0, lambda: messagebox.showinfo(
+                    "Removal Complete",
+                    f"Removal finished.\n\n"
+                    f"Deleted : {', '.join(deleted) if deleted else 'none'}\n"
+                    f"Skipped : {', '.join(skipped) if skipped else 'none'}\n"
+                    f"(Skipped = not found or group still has hosts)"))
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda m=err: self._log(f"Removal failed: {m}", "ERR"))
+                self.after(0, lambda m=err: messagebox.showerror("Removal failed", m))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── Shared helpers ────────────────────────────────────────────────────
 

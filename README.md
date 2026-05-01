@@ -1,6 +1,6 @@
 # EDAO-NMS Onboarding Tool
 
-**Version:** 2.7  
+**Version:** 2.8  
 **Platform:** macOS (Apple Silicon / Intel) · Windows  
 **Requires:** Python 3.9+  (no extra packages — uses only the standard library)
 
@@ -130,6 +130,12 @@ Color coding: `teal` = success, `yellow` = warning / skipped, `red` = error.
 ---
 
 ## Release History
+
+### v2.8 — 2026-04-30
+- New **🗑️ Remove Site** tab — permanently deletes all onboarding objects (Discovery Action, Discovery Rule, Host Groups, Proxy) for a given MSP/Customer/Site
+- Customer-level host group is only deleted if it contains no hosts
+- "Copy from Onboarding tab" button pre-fills Remove fields instantly
+- Live preview shows exactly what will be deleted before confirming
 
 ### v2.7 — 2026-04-30
 - Fix: PSK configuration now uses correct TLS values for active proxies in Zabbix 7.x (tls_connect=1, tls_accept=2)
