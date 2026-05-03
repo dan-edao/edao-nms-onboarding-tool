@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.19
+NMS Proxy Onboarding Tool v2.20
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -143,10 +143,16 @@ class Onboarder:
         if existing:
             self._log(f"Proxy '{name}' already exists (id={existing}), skipping.", "WARN")
             return existing
+        # For an active proxy (operating_mode=0), the Zabbix UI's
+        # "Proxy address" field maps to the API's `allowed_addresses`
+        # (the source-IP filter the server enforces on inbound proxy
+        # data). The bare public IP goes there — no prefix, no spaces.
+        # `address`/`port` are passive-mode-only and are intentionally
+        # omitted.
         result = self.api.call("proxy.create",
-            name=name, operating_mode=0,
-            address="127.0.0.1", port="10051",
-            description=f"Public IP: {ip}")
+            name=name,
+            operating_mode=0,
+            allowed_addresses=ip)
         pid = result["proxyids"][0]
         self._log(f"Created proxy '{name}'  (id={pid}, public_ip={ip})")
         return pid
@@ -433,7 +439,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.19")
+        self.title("NMS Proxy Onboarding Tool  v2.20")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
