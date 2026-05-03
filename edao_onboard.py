@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.21
+NMS Proxy Onboarding Tool v2.22
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -178,39 +178,16 @@ class Onboarder:
 
     def create_discovery_rule(self, customer: str, site: str, proxy_id: str,
                                ip_range: str, use_icmp: bool, use_snmp: bool,
-                               snmp_community: str):
-        """Create the discovery rule and return (drule_id, sysdescr_dcheckid).
-
-        The sysDescr dcheckid is needed by `create_discovery_action` to
-        build the second filter condition that gates host creation on a
-        successful SNMP sysDescr check (per spec: hosts must NOT be
-        created from ICMP-only discovery). Returns None for the
-        dcheckid when SNMP is disabled in the GUI.
-        """
+                               snmp_community: str) -> str:
         name = f"Proxy-{customer}-{site}"
         existing = self.api.get_drule_id(name)
         if existing:
-            # Override flow normally clears existing entries before this
-            # runs. If we land here, look up the sysDescr dcheckid from
-            # the existing rule so the action filter can still reference it.
             self._log(f"Discovery rule '{name}' already exists, skipping.", "WARN")
-            full = self.api.call("drule.get",
-                filter={"name": [name]},
-                output=["druleid"],
-                selectDChecks=["dcheckid", "type", "key_"])
-            sysdescr_id = None
-            if full:
-                for dc in full[0].get("dchecks", []):
-                    if (dc.get("type") == self._DCHECK_SNMPV2
-                            and dc.get("key_") == self._SNMP_OID_SYSDESCR):
-                        sysdescr_id = dc["dcheckid"]
-                        break
-            return existing, sysdescr_id
+            return existing
 
-        # Build checks per spec: ICMP (reachability only) + two SNMPv2
-        # checks (sysDescr is the gate for host creation; sysName is
-        # used for hostname). Zabbix agent is intentionally NOT added —
-        # spec forbids it.
+        # Checks: ICMP (reachability) + two SNMPv2 checks
+        # (sysDescr 1.3.6.1.2.1.1.1.0, sysName 1.3.6.1.2.1.1.5.0).
+        # Zabbix agent is intentionally NOT added.
         dchecks = []
         if use_icmp:
             dchecks.append({"type": self._DCHECK_ICMP})
@@ -229,37 +206,19 @@ class Onboarder:
                 "ports": "161",
             })
         if not dchecks:
-            # Defensive fallback — shouldn't happen since the GUI always
-            # has at least one check on by default.
             dchecks.append({"type": self._DCHECK_ICMP})
 
         result = self.api.call("drule.create",
             name=name, iprange=ip_range, delay="5m",
             proxyid=proxy_id, dchecks=dchecks)
         did = result["druleids"][0]
-
-        # Look up the sysDescr dcheckid that Zabbix just assigned so the
-        # discovery action can reference it as the host-creation gate.
-        sysdescr_id = None
-        if use_snmp:
-            full = self.api.call("drule.get",
-                druleids=[did], output=["druleid"],
-                selectDChecks=["dcheckid", "type", "key_"])
-            if full:
-                for dc in full[0].get("dchecks", []):
-                    if (dc.get("type") == self._DCHECK_SNMPV2
-                            and dc.get("key_") == self._SNMP_OID_SYSDESCR):
-                        sysdescr_id = dc["dcheckid"]
-                        break
-
         self._log(f"Created discovery rule '{name}'  (id={did}, range={ip_range})")
-        return did, sysdescr_id
+        return did
 
     # ── Step 3b: Discovery action ─────────────────────────────────────────
 
     def create_discovery_action(self, customer: str, site: str, drule_id: str,
-                                 gid1: str, gid2: str, template_ids: list,
-                                 sysdescr_dcheckid: Optional[str] = None) -> str:
+                                 gid1: str, gid2: str, template_ids: list) -> str:
         # Naming convention from live data:  Discovery{Customer}-{Site}
         action_name = f"Discovery{customer}-{site}"
         existing = self.api.call("action.get",
@@ -280,36 +239,15 @@ class Onboarder:
                 "optemplate": [{"templateid": tid}],
             })
 
-        # Filter conditions per spec:
-        #   A. Discovery check equals SNMPv2 sysDescr (gates host
-        #      creation on a successful SNMP response — prevents
-        #      ICMP-only discoveries from creating hosts)
-        #   B. Discovery rule equals this rule
-        # evaltype=1 (AND) makes the UI show "And" with labels A and B.
-        # If SNMP is disabled (no sysdescr_dcheckid), fall back to a
-        # single condition on the rule and warn — the action will still
-        # be created but ICMP-only discoveries can produce hosts.
-        conditions = []
-        if sysdescr_dcheckid:
-            conditions.append({                          # type 19 = discovery check
-                "conditiontype": 19, "operator": 0,
-                "value": str(sysdescr_dcheckid),
-            })
-        else:
-            self._log("No SNMP sysDescr dcheckid available — action filter will "
-                      "rely on the rule alone, allowing ICMP-only host creation.", "WARN")
-        conditions.append({                              # type 18 = discovery rule
-            "conditiontype": 18, "operator": 0,
-            "value": str(drule_id),
-        })
-
         result = self.api.call("action.create",
             name=action_name,
             eventsource=1,          # Discovery
             status=0,               # Enabled
             filter={
-                "evaltype": 1 if len(conditions) > 1 else 0,   # 1 = AND
-                "conditions": conditions,
+                "evaltype": 0,
+                "conditions": [{    # Match only this discovery rule  (type 18)
+                    "conditiontype": 18, "operator": 0, "value": str(drule_id),
+                }],
             },
             operations=operations,
         )
@@ -375,14 +313,13 @@ class Onboarder:
         r["gid1"], r["gid2"] = self.create_host_groups(msp, customer, site)
 
         self._log("── Step 3a: Create Discovery Rule ───────────────")
-        r["drule_id"], r["sysdescr_dcheckid"] = self.create_discovery_rule(
+        r["drule_id"] = self.create_discovery_rule(
             customer, site, r["proxy_id"], ip_range,
             use_icmp, use_snmp, snmp_community)
 
         self._log("── Step 3b: Create Discovery Action ─────────────")
         r["action_id"] = self.create_discovery_action(
-            customer, site, r["drule_id"], r["gid1"], r["gid2"],
-            template_ids, sysdescr_dcheckid=r["sysdescr_dcheckid"])
+            customer, site, r["drule_id"], r["gid1"], r["gid2"], template_ids)
 
         self._log("═" * 52)
         self._log("Onboarding complete!", "OK")
@@ -514,7 +451,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.21")
+        self.title("NMS Proxy Onboarding Tool  v2.22")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
@@ -1328,8 +1265,6 @@ class App(tk.Tk):
         defaults = {
             "edao - icmp ping",
             "edao-icmp ping",
-            "edao - generic by snmp",
-            "edao-generic by snmp",
         }
         # Build a filtered view; track original indices for selection lookup
         self._filtered_template_indices = []
