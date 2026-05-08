@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.24
+NMS Proxy Onboarding Tool v2.25
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -255,6 +255,199 @@ class Onboarder:
         self._log(f"Created discovery action '{action_name}'  (id={aid})")
         return aid
 
+    # ── Step 3c: Proxy-state monitoring ───────────────────────────────────
+    #
+    # Per-proxy monitoring of the proxy itself (last seen, version
+    # compatibility) lives on EDAO-NMS-Master because that's where Zabbix
+    # internally tracks proxy state. Historically these items + triggers
+    # were auto-created by the LLD rule "EDAO-NMS proxy discovery" — but
+    # that approach had two problems:
+    #   1. Unable to attach per-proxy MSP/Customer/Site context to the
+    #      auto-discovered triggers (LLD overrides apply uniformly).
+    #   2. Zabbix doesn't propagate prototype tag changes to existing
+    #      discovered triggers.
+    # So as of v2.25 the LLD is disabled and the onboarding tool creates
+    # the items + triggers directly, with hardcoded MSP/Customer/Site/
+    # Affected tags so notifications resolve correctly.
+
+    EDAO_NMS_MASTER_HOST  = "EDAO-NMS-Master"
+    PROXY_DISCOVERY_KEY   = "zabbix[proxy,discovery]"
+
+    _PROXY_STATE_TRIGGER_DEFS = [
+        {
+            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy is outdated",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[{p}],#1)=2',
+            "priority":      "3",
+            "comments":      ("EDAO proxy version is older than server version, but is "
+                              "partially supported. Only data collection and remote "
+                              "execution is available."),
+        },
+        {
+            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy is not supported",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[{p}],#1)=3',
+            "priority":      "4",
+            "comments":      ("Proxy version is incompatible with the server — some "
+                              "features may not work.\nUpgrade the EDAO proxy to match "
+                              "the server version."),
+        },
+        {
+            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy last seen",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[{p}],#1)>{$PROXY.LAST_SEEN.MAX}',
+            "priority":      "5",
+            "comments":      ("All devices monitored through this proxy are UNREACHABLE."
+                              "\nCheck proxy connectivity and restart the EDAO proxy "
+                              "service if needed.\nSSH: ssh ubuntu@<proxy-ip> && sudo "
+                              "systemctl restart zabbix-proxy"),
+        },
+        {
+            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy never seen",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[{p}],#1)=-1',
+            "priority":      "5",
+            "comments":      ("This proxy has never connected to the EDAO server — no "
+                              "devices behind it are monitored.\nVerify proxy "
+                              "configuration and check network/firewall rules between "
+                              "proxy and EDAO server."),
+        },
+    ]
+
+    def _master_hostid(self) -> Optional[str]:
+        r = self.api.call("host.get",
+            filter={"host": [self.EDAO_NMS_MASTER_HOST]}, output=["hostid"])
+        return r[0]["hostid"] if r else None
+
+    def _global_proxy_master_itemid(self, master_hostid: str) -> Optional[str]:
+        r = self.api.call("item.get",
+            hostids=[master_hostid],
+            filter={"key_": [self.PROXY_DISCOVERY_KEY]},
+            output=["itemid"])
+        return r[0]["itemid"] if r else None
+
+    def _get_item_by_key(self, hostid: str, key_: str) -> Optional[str]:
+        r = self.api.call("item.get",
+            hostids=[hostid], filter={"key_": [key_]}, output=["itemid"])
+        return r[0]["itemid"] if r else None
+
+    def create_proxy_state_monitoring(self, proxy_name: str,
+                                      msp: str, customer: str, site: str) -> dict:
+        """Create the per-proxy items + 4 triggers that monitor proxy
+        liveness/version on EDAO-NMS-Master, with hardcoded
+        MSP/Customer/Site/Affected tags so alerts resolve correctly.
+        Idempotent: anything that already exists is left alone."""
+        result = {"items": [], "triggers": []}
+
+        master_hostid = self._master_hostid()
+        if not master_hostid:
+            self._log(f"Host '{self.EDAO_NMS_MASTER_HOST}' not found — skipping "
+                      f"proxy-state monitoring.", "WARN")
+            return result
+
+        global_master_id = self._global_proxy_master_itemid(master_hostid)
+        if not global_master_id:
+            self._log(f"Master item '{self.PROXY_DISCOVERY_KEY}' not found on "
+                      f"{self.EDAO_NMS_MASTER_HOST} — skipping proxy-state "
+                      f"monitoring.", "WARN")
+            return result
+
+        # 1) stats[<proxy>] — depends on the global proxy-discovery master,
+        #    extracts this proxy's record from the JSON list. No history kept.
+        stats_key = f"zabbix.proxy.stats[{proxy_name}]"
+        stats_id = self._get_item_by_key(master_hostid, stats_key)
+        if stats_id:
+            self._log(f"  Item '{stats_key}' already exists (id={stats_id})")
+        else:
+            r = self.api.call("item.create",
+                name=f"Proxy [{proxy_name}]: Stats",
+                key_=stats_key,
+                hostid=master_hostid,
+                type=18,                                 # dependent item
+                value_type=4,                            # text
+                master_itemid=global_master_id,
+                history="0", trends="0",
+                preprocessing=[{
+                    "type": "12",                        # JSONPath
+                    "params": f'$.[?(@.name=="{proxy_name}")].first()',
+                    "error_handler": "0",
+                    "error_handler_params": "",
+                }])
+            stats_id = r["itemids"][0]
+            self._log(f"  Created item '{stats_key}'  (id={stats_id})")
+        result["items"].append(("stats", stats_id))
+
+        # 2) compatibility[<proxy>] — depends on stats[<proxy>], throttled 12h
+        compat_key = f"zabbix.proxy.compatibility[{proxy_name}]"
+        compat_id = self._get_item_by_key(master_hostid, compat_key)
+        if compat_id:
+            self._log(f"  Item '{compat_key}' already exists (id={compat_id})")
+        else:
+            r = self.api.call("item.create",
+                name=f"Proxy [{proxy_name}]: Compatibility",
+                key_=compat_key,
+                hostid=master_hostid,
+                type=18, value_type=3,
+                master_itemid=stats_id,
+                history="31d", trends="365d",
+                preprocessing=[
+                    {"type": "12", "params": "$.compatibility",
+                     "error_handler": "0", "error_handler_params": ""},
+                    {"type": "20", "params": "12h",
+                     "error_handler": "0", "error_handler_params": ""},
+                ])
+            compat_id = r["itemids"][0]
+            self._log(f"  Created item '{compat_key}'  (id={compat_id})")
+        result["items"].append(("compatibility", compat_id))
+
+        # 3) last_seen[<proxy>] — depends on stats[<proxy>], no throttling
+        last_seen_key = f"zabbix.proxy.last_seen[{proxy_name}]"
+        last_seen_id = self._get_item_by_key(master_hostid, last_seen_key)
+        if last_seen_id:
+            self._log(f"  Item '{last_seen_key}' already exists (id={last_seen_id})")
+        else:
+            r = self.api.call("item.create",
+                name=f"Proxy [{proxy_name}]: Last seen, in seconds",
+                key_=last_seen_key,
+                hostid=master_hostid,
+                type=18, value_type=0,
+                master_itemid=stats_id,
+                history="31d", trends="365d",
+                preprocessing=[{
+                    "type": "12", "params": "$.last_seen",
+                    "error_handler": "0", "error_handler_params": "",
+                }])
+            last_seen_id = r["itemids"][0]
+            self._log(f"  Created item '{last_seen_key}'  (id={last_seen_id})")
+        result["items"].append(("last_seen", last_seen_id))
+
+        # 4) The 4 triggers — all share the same tag set, varying per proxy.
+        common_tags = [
+            {"tag": "scope",    "value": "availability"},
+            {"tag": "MSP",      "value": msp},
+            {"tag": "Customer", "value": customer},
+            {"tag": "Site",     "value": site},
+            {"tag": "Affected", "value": proxy_name},
+        ]
+        for tdef in self._PROXY_STATE_TRIGGER_DEFS:
+            desc = tdef["desc_template"].format(p=proxy_name)
+            existing = self.api.call("trigger.get",
+                filter={"description": [desc]}, output=["triggerid"])
+            if existing:
+                tid = existing[0]["triggerid"]
+                self._log(f"  Trigger '{desc}' already exists (id={tid}) — skipping")
+                result["triggers"].append((desc, tid))
+                continue
+            r = self.api.call("trigger.create", [{
+                "description": desc,
+                "expression":  tdef["expr_template"].format(p=proxy_name),
+                "priority":    tdef["priority"],
+                "comments":    tdef["comments"],
+                "opdata":      "Current value: {ITEM.LASTVALUE1}",
+                "tags":        common_tags,
+            }])
+            tid = r["triggerids"][0]
+            self._log(f"  Created trigger '{desc}'  (id={tid})")
+            result["triggers"].append((desc, tid))
+
+        return result
+
     # ── Step 4: Mass-update hosts ─────────────────────────────────────────
 
     def mass_update_hosts(self, host_ids: list, add_group_id: Optional[str],
@@ -321,6 +514,11 @@ class Onboarder:
         r["action_id"] = self.create_discovery_action(
             customer, site, r["drule_id"], r["gid1"], r["gid2"], template_ids)
 
+        self._log("── Step 3c: Create Proxy-State Monitoring ──────")
+        proxy_name = f"Proxy{customer}{site}"
+        r["proxy_state"] = self.create_proxy_state_monitoring(
+            proxy_name, msp, customer, site)
+
         self._log("═" * 52)
         self._log("Onboarding complete!", "OK")
         self._log(f"  Proxy       : Proxy{customer}{site}   (id={r['proxy_id']})")
@@ -328,6 +526,9 @@ class Onboarder:
         self._log(f"  Group 2     : {msp}/{customer}/{site}  (id={r['gid2']})")
         self._log(f"  Disc. rule  : Proxy-{customer}-{site}       (id={r['drule_id']})")
         self._log(f"  Disc. action: Discovery{customer}-{site}    (id={r['action_id']})")
+        ps = r.get("proxy_state", {})
+        self._log(f"  Proxy state : {len(ps.get('items',[]))} item(s) + "
+                  f"{len(ps.get('triggers',[]))} trigger(s) on {self.EDAO_NMS_MASTER_HOST}")
         if psk_identity and psk:
             self._log("── Step 5: Configure PSK Encryption ─────────────")
             self.configure_psk(r["proxy_id"], psk_identity, psk)
@@ -422,7 +623,35 @@ class Remover:
             self._log("  No hosts assigned to this proxy — skipped.", "WARN")
             results["hosts_deleted"] = 0
 
-        # 5 — Proxy (all hosts deleted, safe to remove)
+        # 5 — Proxy-state monitoring on EDAO-NMS-Master
+        # Delete the 3 items (compatibility, last_seen, stats) — Zabbix
+        # cascades trigger deletion automatically when the items go away.
+        self._log(f"── Removing Proxy-State Monitoring on EDAO-NMS-Master")
+        master = self.api.call("host.get",
+            filter={"host": ["EDAO-NMS-Master"]}, output=["hostid"])
+        deleted_state_items = []
+        if master:
+            master_hostid = master[0]["hostid"]
+            for kind, key_ in [
+                ("compatibility", f"zabbix.proxy.compatibility[{proxy_name}]"),
+                ("last_seen",     f"zabbix.proxy.last_seen[{proxy_name}]"),
+                ("stats",         f"zabbix.proxy.stats[{proxy_name}]"),
+            ]:
+                r = self.api.call("item.get",
+                    hostids=[master_hostid], filter={"key_": [key_]},
+                    output=["itemid"])
+                if r:
+                    iid = r[0]["itemid"]
+                    self.api.call("item.delete", [iid])
+                    self._log(f"  Deleted item '{key_}' (id={iid})", "OK")
+                    deleted_state_items.append(iid)
+                else:
+                    self._log(f"  Item '{key_}' not found — skipped.", "WARN")
+        else:
+            self._log(f"  Host 'EDAO-NMS-Master' not found — skipped.", "WARN")
+        results["proxy_state_items"] = deleted_state_items
+
+        # 6 — Proxy (all hosts deleted, safe to remove)
         self._log(f"── Removing Proxy: {proxy_name}")
         if pid:
             self.api.call("proxy.delete", [pid])
@@ -451,7 +680,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.24")
+        self.title("NMS Proxy Onboarding Tool  v2.25")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
@@ -1012,6 +1241,7 @@ class App(tk.Tk):
                 f"Host Group     :  {msp}/{customer}/{site}",
                 f"Host Group     :  {msp}/{customer}  (only if empty)",
                 f"All Hosts      :  members of {msp}/{customer}/{site}",
+                f"Proxy state    :  3 item(s) + 4 trigger(s) on EDAO-NMS-Master",
                 f"Proxy          :  Proxy{customer}{site}",
             ]
             self._rem_preview_var.set("\n".join(lines))
@@ -1044,6 +1274,7 @@ class App(tk.Tk):
             f"  Host Group     :  {msp}/{customer}/{site}\n"
             f"  Host Group     :  {msp}/{customer}  (if empty)\n"
             f"  All Hosts      :  members of site group\n"
+            f"  Proxy state    :  3 item(s) + 4 trigger(s) on EDAO-NMS-Master\n"
             f"  Proxy          :  Proxy{customer}{site}\n\n"
             f"⚠️  ALL HOSTS in the site group will be deleted.\n"
             f"This cannot be undone.\nAre you sure?",
@@ -1124,6 +1355,7 @@ class App(tk.Tk):
                 f"Group 2     :  {msp}/{cust}/{site}",
                 f"Disc. rule  :  Proxy-{cust}-{site}",
                 f"Disc. action:  Discovery{cust}-{site}",
+                f"Proxy state :  4 trigger(s) on EDAO-NMS-Master",
             ]
             self._preview_var.set("\n".join(lines))
         else:
@@ -1292,6 +1524,17 @@ class App(tk.Tk):
             found.append(("Discovery action", action_name))
         if self.api.get_hostgroup_id(site_group):
             found.append(("Site host group",  site_group))
+        # Proxy-state monitoring on EDAO-NMS-Master (v2.25+): items only,
+        # since their triggers cascade with them.
+        master = self.api.call("host.get",
+            filter={"host": ["EDAO-NMS-Master"]}, output=["hostid"])
+        if master:
+            stats_key = f"zabbix.proxy.stats[{proxy_name}]"
+            r = self.api.call("item.get",
+                hostids=[master[0]["hostid"]],
+                filter={"key_": [stats_key]}, output=["itemid"])
+            if r:
+                found.append(("Proxy-state monitoring", stats_key))
         return found
 
     def _run_onboarding(self):
@@ -1369,6 +1612,7 @@ class App(tk.Tk):
                 f"  Group 2     :  {msp}/{customer}/{site}\n"
                 f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
                 f"  Disc. action:  Discovery{customer}-{site}\n"
+                f"  Proxy state :  4 trigger(s) on EDAO-NMS-Master\n"
                 f"  Templates   :  {len(template_ids)} selected\n"
                 f"{psk_line}\nProceed?"):
                 return
