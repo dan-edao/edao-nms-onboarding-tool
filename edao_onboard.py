@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.22
+NMS Proxy Onboarding Tool v2.24
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -160,8 +160,8 @@ class Onboarder:
     # ── Step 2: Host groups ───────────────────────────────────────────────
 
     def create_host_groups(self, msp: str, customer: str, site: str) -> tuple:
-        g1 = f"MSP/{msp}/{customer}"
-        g2 = f"MSP/{msp}/{customer}/{site}"
+        g1 = f"{msp}/{customer}"
+        g2 = f"{msp}/{customer}/{site}"
         gid1 = self.api.get_or_create_hostgroup(g1)
         self._log(f"Host group '{g1}'  (id={gid1})")
         gid2 = self.api.get_or_create_hostgroup(g2)
@@ -324,8 +324,8 @@ class Onboarder:
         self._log("═" * 52)
         self._log("Onboarding complete!", "OK")
         self._log(f"  Proxy       : Proxy{customer}{site}   (id={r['proxy_id']})")
-        self._log(f"  Group 1     : MSP/{msp}/{customer}    (id={r['gid1']})")
-        self._log(f"  Group 2     : MSP/{msp}/{customer}/{site}  (id={r['gid2']})")
+        self._log(f"  Group 1     : {msp}/{customer}    (id={r['gid1']})")
+        self._log(f"  Group 2     : {msp}/{customer}/{site}  (id={r['gid2']})")
         self._log(f"  Disc. rule  : Proxy-{customer}-{site}       (id={r['drule_id']})")
         self._log(f"  Disc. action: Discovery{customer}-{site}    (id={r['action_id']})")
         if psk_identity and psk:
@@ -383,12 +383,12 @@ class Remover:
 
         # 3 — Host Group (site-level only)
         # Removing a site must NOT touch the customer-level host group
-        # (MSP/<msp>/<customer>) because sibling sites' Discovery Actions
+        # (<msp>/<customer>) because sibling sites' Discovery Actions
         # still reference it — Zabbix correctly refuses with "action
         # '<DiscoveryX>' uses this host group" and the whole removal
         # aborts mid-flight. Customer-group cleanup is a separate concern;
         # it should happen when the customer record itself is removed.
-        g2_name = f"MSP/{msp}/{customer}/{site}"
+        g2_name = f"{msp}/{customer}/{site}"
         self._log(f"── Removing Host Group: {g2_name}")
         gid2 = self.api.get_hostgroup_id(g2_name)
         if gid2:
@@ -451,21 +451,20 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.22")
+        self.title("NMS Proxy Onboarding Tool  v2.24")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
         self.resizable(False, False)
 
-        # Center on the primary screen and lock that position so the
-        # window cannot be dragged to a new location.
+        # Center on the primary screen on first show. The user is free to
+        # drag the window afterwards — we don't snap it back.
         self.update_idletasks()
         scr_w = self.winfo_screenwidth()
         scr_h = self.winfo_screenheight()
-        self._fixed_x = max(0, (scr_w - win_w) // 2)
-        self._fixed_y = max(0, (scr_h - win_h) // 3)
-        self.geometry(f"{win_w}x{win_h}+{self._fixed_x}+{self._fixed_y}")
-        self.bind("<Configure>", self._lock_position)
+        init_x = max(0, (scr_w - win_w) // 2)
+        init_y = max(0, (scr_h - win_h) // 3)
+        self.geometry(f"{win_w}x{win_h}+{init_x}+{init_y}")
 
         self.api: Optional[ZabbixAPI]  = None
         self._connected                = False
@@ -476,13 +475,6 @@ class App(tk.Tk):
         self._build_ui()
         self._load_config()
         self._load_prefill_from_downloads()
-
-    def _lock_position(self, event):
-        # Snap the window back if the OS or the user moves it.
-        if event.widget is not self:
-            return
-        if (self.winfo_x(), self.winfo_y()) != (self._fixed_x, self._fixed_y):
-            self.geometry(f"+{self._fixed_x}+{self._fixed_y}")
 
     # ── Config ────────────────────────────────────────────────────────────
 
@@ -1017,9 +1009,9 @@ class App(tk.Tk):
             lines = [
                 f"Discovery Act. :  Discovery{customer}-{site}",
                 f"Discovery Rule :  Proxy-{customer}-{site}",
-                f"Host Group     :  MSP/{msp}/{customer}/{site}",
-                f"Host Group     :  MSP/{msp}/{customer}  (only if empty)",
-                f"All Hosts      :  members of MSP/{msp}/{customer}/{site}",
+                f"Host Group     :  {msp}/{customer}/{site}",
+                f"Host Group     :  {msp}/{customer}  (only if empty)",
+                f"All Hosts      :  members of {msp}/{customer}/{site}",
                 f"Proxy          :  Proxy{customer}{site}",
             ]
             self._rem_preview_var.set("\n".join(lines))
@@ -1049,8 +1041,8 @@ class App(tk.Tk):
             f"This will PERMANENTLY DELETE from EDAO-NMS:\n\n"
             f"  Discovery Act. :  Discovery{customer}-{site}\n"
             f"  Discovery Rule :  Proxy-{customer}-{site}\n"
-            f"  Host Group     :  MSP/{msp}/{customer}/{site}\n"
-            f"  Host Group     :  MSP/{msp}/{customer}  (if empty)\n"
+            f"  Host Group     :  {msp}/{customer}/{site}\n"
+            f"  Host Group     :  {msp}/{customer}  (if empty)\n"
             f"  All Hosts      :  members of site group\n"
             f"  Proxy          :  Proxy{customer}{site}\n\n"
             f"⚠️  ALL HOSTS in the site group will be deleted.\n"
@@ -1128,8 +1120,8 @@ class App(tk.Tk):
         if msp or cust or site:
             lines = [
                 f"Proxy name  :  Proxy{cust}{site}",
-                f"Group 1     :  MSP/{msp}/{cust}",
-                f"Group 2     :  MSP/{msp}/{cust}/{site}",
+                f"Group 1     :  {msp}/{cust}",
+                f"Group 2     :  {msp}/{cust}/{site}",
                 f"Disc. rule  :  Proxy-{cust}-{site}",
                 f"Disc. action:  Discovery{cust}-{site}",
             ]
@@ -1291,7 +1283,7 @@ class App(tk.Tk):
         proxy_name  = f"Proxy{customer}{site}"
         drule_name  = f"Proxy-{customer}-{site}"
         action_name = f"Discovery{customer}-{site}"
-        site_group  = f"MSP/{msp}/{customer}/{site}"
+        site_group  = f"{msp}/{customer}/{site}"
         if self.api.get_proxy_id(proxy_name):
             found.append(("Proxy",            proxy_name))
         if self.api.get_drule_id(drule_name):
@@ -1373,8 +1365,8 @@ class App(tk.Tk):
             if not messagebox.askyesno("Confirm Onboarding",
                 f"About to create:\n\n"
                 f"  Proxy       :  Proxy{customer}{site}  ({proxy_ip})\n"
-                f"  Group 1     :  MSP/{msp}/{customer}\n"
-                f"  Group 2     :  MSP/{msp}/{customer}/{site}\n"
+                f"  Group 1     :  {msp}/{customer}\n"
+                f"  Group 2     :  {msp}/{customer}/{site}\n"
                 f"  Disc. rule  :  Proxy-{customer}-{site}  (range: {ip_range})\n"
                 f"  Disc. action:  Discovery{customer}-{site}\n"
                 f"  Templates   :  {len(template_ids)} selected\n"
