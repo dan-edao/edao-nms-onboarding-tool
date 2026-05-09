@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NMS Proxy Onboarding Tool v2.26
+NMS Proxy Onboarding Tool v2.27
 Automates MSP/Customer/Site onboarding in EDAO-NMS (Zabbix 7.x) via API.
 Cross-platform: macOS (Apple Silicon) and Windows.
 """
@@ -288,26 +288,32 @@ class Onboarder:
     EDAO_NMS_MASTER_HOST  = "EDAO-NMS-Master"
     PROXY_DISCOVERY_KEY   = "zabbix[proxy,discovery]"
 
+    # Templates use the literal sentinel `__PROXY__` for the proxy name
+    # (substituted via str.replace below). DO NOT use `{p}` / .format()
+    # here: the third template contains the Zabbix user macro
+    # `{$PROXY.LAST_SEEN.MAX}`, and Python's format parser reads its
+    # `{$PROXY...}` as a field-name + attribute lookup, raising
+    # KeyError: '$PROXY'. (v2.27 fix.)
     _PROXY_STATE_TRIGGER_DEFS = [
         {
-            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy is outdated",
-            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[{p}],#1)=2',
+            "desc_template": "EDAO server: Proxy [__PROXY__]: EDAO proxy is outdated",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[__PROXY__],#1)=2',
             "priority":      "3",
             "comments":      ("EDAO proxy version is older than server version, but is "
                               "partially supported. Only data collection and remote "
                               "execution is available."),
         },
         {
-            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy is not supported",
-            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[{p}],#1)=3',
+            "desc_template": "EDAO server: Proxy [__PROXY__]: EDAO proxy is not supported",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.compatibility[__PROXY__],#1)=3',
             "priority":      "4",
             "comments":      ("Proxy version is incompatible with the server — some "
                               "features may not work.\nUpgrade the EDAO proxy to match "
                               "the server version."),
         },
         {
-            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy last seen",
-            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[{p}],#1)>{$PROXY.LAST_SEEN.MAX}',
+            "desc_template": "EDAO server: Proxy [__PROXY__]: EDAO proxy last seen",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[__PROXY__],#1)>{$PROXY.LAST_SEEN.MAX}',
             "priority":      "5",
             "comments":      ("All devices monitored through this proxy are UNREACHABLE."
                               "\nCheck proxy connectivity and restart the EDAO proxy "
@@ -315,8 +321,8 @@ class Onboarder:
                               "systemctl restart zabbix-proxy"),
         },
         {
-            "desc_template": "EDAO server: Proxy [{p}]: EDAO proxy never seen",
-            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[{p}],#1)=-1',
+            "desc_template": "EDAO server: Proxy [__PROXY__]: EDAO proxy never seen",
+            "expr_template": 'last(/EDAO-NMS-Master/zabbix.proxy.last_seen[__PROXY__],#1)=-1',
             "priority":      "5",
             "comments":      ("This proxy has never connected to the EDAO server — no "
                               "devices behind it are monitored.\nVerify proxy "
@@ -440,8 +446,11 @@ class Onboarder:
             {"tag": "Site",     "value": site},
             {"tag": "Affected", "value": proxy_name},
         ]
+        # v2.27: use str.replace, NOT str.format — the third trigger's
+        # expression contains the Zabbix user macro `{$PROXY.LAST_SEEN.MAX}`
+        # which Python's format parser misreads as a field/attribute spec.
         for tdef in self._PROXY_STATE_TRIGGER_DEFS:
-            desc = tdef["desc_template"].format(p=proxy_name)
+            desc = tdef["desc_template"].replace("__PROXY__", proxy_name)
             existing = self.api.call("trigger.get",
                 filter={"description": [desc]}, output=["triggerid"])
             if existing:
@@ -451,7 +460,7 @@ class Onboarder:
                 continue
             r = self.api.call("trigger.create", [{
                 "description": desc,
-                "expression":  tdef["expr_template"].format(p=proxy_name),
+                "expression":  tdef["expr_template"].replace("__PROXY__", proxy_name),
                 "priority":    tdef["priority"],
                 "comments":    tdef["comments"],
                 "opdata":      "Current value: {ITEM.LASTVALUE1}",
@@ -695,7 +704,7 @@ FONT_SMALL  = ("Helvetica", 12)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("NMS Proxy Onboarding Tool  v2.26")
+        self.title("NMS Proxy Onboarding Tool  v2.27")
 
         # Fixed size — window cannot be resized.
         win_w, win_h = 900, 760
